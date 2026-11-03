@@ -19,11 +19,26 @@ Personal portfolio for backend (Spring Boot/PostgreSQL) and data science roles.
   starlight text #E8ECF8, brass accent #E0B66A
 - Projects shown as framed paintings in "The Collection," each with a
   "Medium:" placard listing the tech stack and a "liner notes" case study page
+- String dividers: thin brass (#E0B66A) SVG lines between sections, slightly wavy like a
+  guitar string at rest; on hover they briefly vibrate like a plucked string, then settle.
+  Decorative only (aria-hidden), and still with prefers-reduced-motion
 - Motion is slow and calm; everything respects prefers-reduced-motion
 
 ## Projects
-Featured (in progress): Aurora, Pigment, Ensemble
-Earlier works: Mosquito Watch, FireShield, EverGreen, Habit Hero
+Featured (in progress). These are the only projects shown on the site:
+- Aurora: a probabilistic aurora/space-weather forecaster. It publishes calibrated
+  probabilities, records every forecast in an append-only ledger before outcomes are
+  known, and scores itself against NOAA's forecasts. Python (statistics/ML), Spring Boot,
+  PostgreSQL, GitHub Actions. Its live forecast will later drive the aurora in the hero.
+- Pigment: search and recolor paintings by their full color distributions (Gaussian
+  mixtures, optimal transport), using museum open-access collections. Python, Spring Boot,
+  PostgreSQL + pgvector, Redis, TypeScript.
+- Ensemble: lets musicians in different places record parts that line up to the sample,
+  using clock sync and device latency calibration. Spring Boot (WebSocket), PostgreSQL,
+  Redis, Web Audio API, TypeScript.
+
+Projects are built in layers. Each project page shows its current status and a changelog.
+Never present unbuilt features as finished. Hackathon projects are not shown on the site.
 
 ## Git workflow
 - Every task starts from a GitHub issue. Read it with `gh issue view <number>`.
