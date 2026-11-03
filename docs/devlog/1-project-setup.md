@@ -23,3 +23,22 @@ Every later change should go through the same workflow: an issue, a branch, a PR
 - **Generated AGENTS.md**: Next.js generated an AGENTS.md file. Kept it and imported it from CLAUDE.md instead of duplicating its content.
 
 ## What I learned
+- **Version ranges matter.** npm packages declare which Node versions they support in an
+  `engines` field. `^22.13.0` means "22.13 or newer, but still version 22," so my 22.11
+  didn't qualify. It was only a warning, but warnings like this can turn into confusing
+  failures later, so I updated to the current LTS. CI uses `lts/*` so it stays current too.
+- **`npm ci` vs `npm install`.** CI uses `npm ci`, which installs exactly what's in
+  `package-lock.json` from a clean slate. That makes builds reproducible: CI tests the same
+  dependency versions I have locally.
+- **Don't blindly force fixes.** `npm audit fix --force` can jump packages to new major
+  versions with breaking changes. The reported vulnerabilities were in development tools,
+  not code shipped to visitors, so leaving them for upstream fixes was the safer call.
+- **Renaming a default branch takes several steps.** Rename locally, push the new branch,
+  change the default on GitHub, delete the old remote branch, and set
+  `init.defaultBranch` so future repos start on `main`.
+- **Automation enforces the process.** "Closes #1" in a PR closes the issue on merge,
+  project board workflows move cards automatically, and a ruleset with a required CI check
+  means nothing broken can reach `main`, even when I'm the only developer.
+- **AI tools need project context.** `CLAUDE.md` gives Claude Code standing instructions,
+  and importing `AGENTS.md` with `@AGENTS.md` reuses the guidance Next.js generated
+  instead of duplicating it.

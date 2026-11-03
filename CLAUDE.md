@@ -37,6 +37,8 @@ Earlier works: Mosquito Watch, FireShield, EverGreen, Habit Hero
 - Run `npm run build` and `npm run lint` before saying a task is done
 - Accessible: semantic HTML, keyboard focus, good contrast, alt text
 - After each PR, draft a devlog entry in docs/devlog/ named <issue-number>-short-name.md,
-  following docs/devlog/TEMPLATE.md. Leave "What I learned" empty for me to write.
+  following docs/devlog/TEMPLATE.md. Before writing "What I learned," ask me 2–3 short
+  questions about what was new, surprising, or difficult for me, then write the section
+  in first person from my answers. Keep my wording where possible.
 - Record major technical decisions as ADRs in docs/decisions/, following
   docs/decisions/TEMPLATE.md, numbered ADR-001, ADR-002, and so on.
