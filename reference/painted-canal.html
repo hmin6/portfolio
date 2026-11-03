@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Painted canal — live prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#E9EEF7; --text:#121833; --muted:#3F4868; --line:#C6CEE4; --accent:#0B6E50;
+  color-scheme: light dark;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){ --bg:#0B1026; --text:#E8ECF8; --muted:#A9B3D1; --line:#222B5A; --accent:#3DFFB0; color-scheme:dark; }
+}
+:root[data-theme="dark"]{ --bg:#0B1026; --text:#E8ECF8; --muted:#A9B3D1; --line:#222B5A; --accent:#3DFFB0; color-scheme:dark; }
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+
+.hero{position:relative;height:100svh;min-height:600px;max-height:1100px;overflow:hidden;background:#03061A;color:#E8ECF8}
+.hero canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#lights{mix-blend-mode:screen;pointer-events:none}
+.weave{position:absolute;inset:0;pointer-events:none;mix-blend-mode:overlay;opacity:.5}
+.vignette{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 42%,rgba(3,6,26,0) 55%,rgba(3,6,26,.5) 100%)}
+.scrim{position:absolute;left:0;right:0;bottom:0;height:58%;pointer-events:none;background:linear-gradient(to top,rgba(2,4,15,.8),rgba(2,4,15,0))}
+
+.intro{position:absolute;left:clamp(20px,5vw,64px);bottom:clamp(36px,8vh,80px);max-width:min(620px,calc(100% - 40px));display:flex;flex-direction:column;gap:18px}
+.intro h1{margin:0;font-family:Fraunces,Georgia,"Times New Roman",serif;font-weight:400;font-size:clamp(52px,9vw,112px);line-height:.95;letter-spacing:-.02em}
+.intro p{margin:0;font-size:clamp(16px,1.6vw,19px);line-height:1.55;color:#DCE2F4;max-width:34em}
+.actions{display:flex;flex-wrap:wrap;gap:12px}
+.btn{display:inline-flex;align-items:center;min-height:48px;padding:0 22px;border-radius:999px;font-weight:600;font-size:16px;text-decoration:none}
+.btn-primary{background:#3DFFB0;color:#0B1026}
+.btn-ghost{border:1px solid rgba(232,236,248,.45);color:#E8ECF8;font-weight:500}
+
+.controls{position:absolute;top:clamp(16px,3vh,28px);right:clamp(16px,4vw,48px);left:clamp(16px,4vw,48px);display:flex;flex-wrap:wrap;justify-content:flex-end;gap:10px}
+.seg{display:flex;padding:4px;border-radius:999px;background:rgba(5,8,26,.55);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);border:1px solid rgba(232,236,248,.2)}
+.seg button,.chip{font:500 14px Inter,system-ui,sans-serif;color:#E2E7F6;background:transparent;border:0;min-height:40px;padding:0 14px;border-radius:999px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:#E8ECF8;color:#0B1026}
+.chip{min-height:48px;padding:0 18px;background:rgba(5,8,26,.55);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);border:1px solid rgba(232,236,248,.2)}
+button:focus-visible,a:focus-visible{outline:2px solid #3DFFB0;outline-offset:3px}
+
+.notes{max-width:68ch;margin:0 auto;padding:clamp(56px,10vw,104px) 24px clamp(64px,10vw,112px)}
+.notes h2{font-family:Fraunces,Georgia,serif;font-weight:400;font-size:clamp(32px,5vw,44px);line-height:1.1;margin:0 0 20px}
+.notes p{font-size:17px;line-height:1.7;color:var(--muted);margin:0 0 18px}
+.notes strong{color:var(--text);font-weight:600}
+.notes .hint{margin-top:32px;padding-top:24px;border-top:1px solid var(--line);font-size:15px}
+</style>
+</head>
+<body>
+
+<section class="hero" aria-label="Painted canal under the aurora">
+  <canvas id="paint" aria-hidden="true"></canvas>
+  <canvas id="lights" aria-hidden="true"></canvas>
+  <div class="weave" id="weave"></div>
+  <div class="vignette"></div>
+  <div class="scrim"></div>
+
+  <div class="controls">
+    <div class="seg" role="group" aria-label="Time of day">
+      <button type="button" data-mode="night" aria-pressed="true">Night</button>
+      <button type="button" data-mode="golden" aria-pressed="false">Golden hour</button>
+      <button type="button" data-mode="day" aria-pressed="false">Day</button>
+    </div>
+    <button type="button" class="chip" id="lanternBtn">Float a lantern</button>
+    <button type="button" class="chip" id="motionBtn" aria-pressed="false">Pause motion</button>
+  </div>
+
+  <div class="intro">
+    <h1>Harrison Min</h1>
+    <p>Backend and data science, CS &amp; Math at Queens College. This canal is painted live in your browser, one brushstroke at a time.</p>
+    <div class="actions">
+      <a class="btn btn-primary" href="#how">How it’s painted</a>
+      <a class="btn btn-ghost" href="https://github.com/hmin6">GitHub</a>
+    </div>
+  </div>
+</section>
+
+<main class="notes" id="how">
+  <h2>How the painting works</h2>
+  <p>Three layers are redrawn on every frame.</p>
+  <p><strong>The hidden scene.</strong> A small off-screen canvas, about 360 pixels wide, draws a plain version of the view: the sky gradient, aurora curtains built from layered sine waves, the distant skyline, the buildings, the gondola and the lanterns. The water is the sky flipped upside down, with each row nudged sideways to make ripples.</p>
+  <p><strong>The brushstrokes.</strong> You never see that scene directly. Each frame, around a thousand curved strokes land at random spots on the visible canvas. Every stroke takes its color from the hidden scene and its direction from where it lands: tall streaks in the aurora, long flat strokes on the water, short dabs on the walls. Strokes shrink near edges so windows and rooftops stay readable. New strokes keep covering old ones, so the painting follows the moving scene with a soft lag, like wet paint.</p>
+  <p><strong>The light.</strong> A third layer adds what paint can’t hold: twinkling stars, flickering lamplight, lantern glow and sun glints on the water, blended on top so they stay bright. A canvas-weave texture and a vignette sit over everything.</p>
+  <p>For the real site, the stroke pass can move into a WebGL shader with React Three Fiber so the GPU paints far more strokes, with this canvas version kept as the fallback and a still frame for anyone who prefers reduced motion.</p>
+  <p class="hint">Tap or click the water to float a lantern.</p>
+</main>
+
+<script>
+(() => {
+  const hero = document.querySelector('.hero');
+  const paint = document.getElementById('paint');
+  const lights = document.getElementById('lights');
+  const pctx = paint.getContext('2d');
+  const lctx = lights.getContext('2d');
+  const scene = document.createElement('canvas');
+  const sctx = scene.getContext('2d', { willReadFrequently: true });
+  const reduceMQ = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  const PALETTES = {
+    night: { skyTop:[4,7,26], skyHor:[30,40,100], distant:[10,14,42], wall:[30,27,58], wall2:[36,31,66], winDark:[20,24,54], winLit:[246,196,118], litAmt:1, waterTint:[3,6,22], aurora:1, sun:0, sunX:.63, sunY:.47, sunCol:[255,214,150], stars:1, under:[46,30,26], boat:[5,7,24], stripe:[170,140,90], pole:[30,30,64], rim:.5 },
+    golden:{ skyTop:[52,44,104], skyHor:[250,170,98], distant:[86,52,78], wall:[118,58,50], wall2:[146,84,62], winDark:[74,42,44], winLit:[255,210,140], litAmt:.55, waterTint:[48,30,58], aurora:0, sun:1, sunX:.66, sunY:.4, sunCol:[255,222,160], stars:.1, under:[70,40,30], boat:[30,18,26], stripe:[230,200,150], pole:[60,36,44], rim:.05 },
+    day:   { skyTop:[64,128,204], skyHor:[200,230,240], distant:[128,150,178], wall:[200,118,80], wall2:[224,188,140], winDark:[58,96,84], winLit:[255,240,210], litAmt:0, waterTint:[28,112,138], aurora:0, sun:.75, sunX:.74, sunY:.14, sunCol:[255,250,230], stars:0, under:[120,90,60], boat:[24,24,34], stripe:[238,238,238], pole:[38,74,140], rim:0 }
+  };
+  const clone = o => JSON.parse(JSON.stringify(o));
+  let target = PALETTES.night;
+  let cur = clone(target);
+  function lerpPal(k){
+    for (const key in target){
+      const v = target[key];
+      if (Array.isArray(v)) for (let i=0;i<3;i++) cur[key][i] += (v[i]-cur[key][i])*k;
+      else cur[key] += (v-cur[key])*k;
+    }
+  }
+  const rgb = (a, al=1) => `rgba(${a[0]|0},${a[1]|0},${a[2]|0},${al})`;
+  const mix = (a,b,k) => [a[0]+(b[0]-a[0])*k, a[1]+(b[1]-a[1])*k, a[2]+(b[2]-a[2])*k];
+  const clamp255 = v => v<0?0:v>255?255:v;
+
+  function makeStrip(bottom, top){
+    const c = document.createElement('canvas'); c.width=1; c.height=64;
+    const g = c.getContext('2d'); const gr = g.createLinearGradient(0,0,0,64);
+    gr.addColorStop(0, `rgba(${top},0)`); gr.addColorStop(.5, `rgba(${top},.55)`); gr.addColorStop(1, `rgba(${bottom},1)`);
+    g.fillStyle = gr; g.fillRect(0,0,1,64); return c;
+  }
+  const strips = [makeStrip('61,255,176','45,212,191'), makeStrip('45,212,191','139,92,246'), makeStrip('167,139,250','232,121,249')];
+  function makeGlow(col){
+    const c = document.createElement('canvas'); c.width=c.height=64;
+    const g = c.getContext('2d'); const gr = g.createRadialGradient(32,32,0,32,32,32);
+    gr.addColorStop(0, `rgba(${col},1)`); gr.addColorStop(.35, `rgba(${col},.45)`); gr.addColorStop(1, `rgba(${col},0)`);
+    g.fillStyle = gr; g.fillRect(0,0,64,64); return c;
+  }
+  const glowWarm = makeGlow('255,200,120');
+  const glowWhite = makeGlow('235,240,255');
+
+  (function weave(){
+    const c = document.createElement('canvas'); c.width=c.height=48;
+    const g = c.getContext('2d'); g.fillStyle='rgb(128,128,128)'; g.fillRect(0,0,48,48);
+    for (let y=0;y<48;y+=3){ const v=128+((y/3)%2?14:-14)+(Math.random()*10-5); g.fillStyle=`rgba(${v},${v},${v},.6)`; g.fillRect(0,y,48,1.4); }
+    for (let x=0;x<48;x+=3){ const v=128+((x/3)%2?12:-12)+(Math.random()*10-5); g.fillStyle=`rgba(${v},${v},${v},.45)`; g.fillRect(x,0,1.4,48); }
+    for (let i=0;i<220;i++){ const v=Math.random()*255; g.fillStyle=`rgba(${v},${v},${v},.12)`; g.fillRect(Math.random()*48,Math.random()*48,1,1); }
+    document.getElementById('weave').style.backgroundImage = `url(${c.toDataURL()})`;
+  })();
+
+  let W=0, H=0, dpr=1, SW=360, SH=225, hy=120, narrow=false;
+  let data = null, t = 0, frames = 0, settle = 0;
+  let running = !reduceMQ.matches, visible = true;
+  let budget = 1100, maxBudget = 1800;
+  let buildings = [], windows = [], distantLights = [], stars = [], band = [];
+  let gondola = { x:0, y:0, L:0, lx:0, ly:0 };
+  let lanterns = [];
+  let bridge = null, poles = [];
+
+  function layout(){
+    const aspect = SW/SH;
+    const lw = SW*(aspect>1.3 ? .2 : .26), rw = SW*(aspect>1.3 ? .17 : .22);
+    buildings = [
+      { x0:0, x1:lw, top:SH*.14, base:SH*.67, wall:'wall', cols:4, rows:3, lit:[1,7,8,10], chim:[.3,.62] },
+      { x0:SW-rw, x1:SW, top:SH*.22, base:SH*.66, wall:'wall2', cols:4, rows:3, lit:[1,7,8], chim:[.45] }
+    ];
+    windows = [];
+    buildings.forEach((b, bi) => {
+      const bw = b.x1-b.x0, bh = b.base-b.top;
+      const ww = bw/(b.cols*2.1), wh = Math.min(bh*.17, ww*2.3);
+      for (let r=0;r<b.rows;r++) for (let c=0;c<b.cols;c++){
+        const i = r*b.cols+c;
+        const cx = b.x0 + bw*((c+.5)/b.cols);
+        const y = b.top + bh*(.1 + r*.26);
+        windows.push({ b:bi, cx, y, w:ww, h:wh, lit:b.lit.includes(i), seed:Math.random()*10 });
+      }
+    });
+    gondola.L = SW*(aspect>1.3 ? .22 : .34);
+    gondola.x = SW*(aspect>1.3 ? .58 : .52);
+    gondola.y = SH*.75;
+    bridge = { x0:lw, x1:lw+SW*.12, y:hy+SH*.045 };
+    poles = [.73,.755,.78].map((f,i) => ({ x:SW*(aspect>1.3?f:f-.06), top:hy+SH*(.01+i*.012), bot:SH*.8 }));
+    distantLights = [];
+    for (let i=0;i<14;i++) distantLights.push({ x:SW*(.24+Math.random()*.55), y:hy-SH*(.004+Math.random()*.02), seed:Math.random()*10 });
+    stars = [];
+    for (let i=0;i<70;i++) stars.push({ x:Math.random(), y:Math.random()*.42, r:.6+Math.random()*1.1, seed:Math.random()*10 });
+  }
+
+  function resize(){
+    const r = hero.getBoundingClientRect();
+    dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    W = Math.max(1, Math.round(r.width*dpr)); H = Math.max(1, Math.round(r.height*dpr));
+    paint.width = lights.width = W; paint.height = lights.height = H;
+    narrow = r.width < 700;
+    SW = narrow ? 220 : 360; SH = Math.max(120, Math.round(SW*r.height/r.width));
+    scene.width = SW; scene.height = SH;
+    hy = Math.round(SH*.53);
+    maxBudget = narrow ? 900 : 1800; budget = Math.min(budget, maxBudget);
+    layout();
+    pctx.lineCap = 'round';
+    underpaint();
+    frames = 0; settle = 0;
+    if (!lanterns.length) seedLanterns();
+  }
+  function underpaint(){ pctx.fillStyle = rgb(cur.under); pctx.fillRect(0,0,W,H); }
+  function seedLanterns(){
+    lanterns = [];
+    for (let i=0;i<3;i++) lanterns.push({ x:SW*(.3+i*.17), y:SH*(.6+i*.07), vx:SW*(.004+Math.random()*.004), seed:Math.random()*10 });
+  }
+  function addLantern(x, y){
+    if (lanterns.length >= 14) lanterns.shift();
+    lanterns.push({ x, y, vx:SW*(.004+Math.random()*.005), seed:Math.random()*10 });
+    settle = 0;
+  }
+
+  function drawScene(){
+    const s = sctx;
+    s.globalAlpha = 1; s.globalCompositeOperation = 'source-over';
+    let g = s.createLinearGradient(0,0,0,hy);
+    g.addColorStop(0, rgb(cur.skyTop)); g.addColorStop(1, rgb(cur.skyHor));
+    s.fillStyle = g; s.fillRect(0,0,SW,hy+1);
+
+    if (cur.sun > .01){
+      const sx = SW*cur.sunX, sy = SH*cur.sunY, R = SW*.28;
+      s.globalAlpha = cur.sun*.7; s.drawImage(glowWarm, sx-R, sy-R, R*2, R*2);
+      s.globalAlpha = cur.sun; s.fillStyle = rgb(cur.sunCol);
+      s.beginPath(); s.arc(sx, sy, SW*.022, 0, Math.PI*2); s.fill();
+      s.globalAlpha = 1;
+    }
+
+    if (band.length !== SW) band = new Array(SW);
+    if (cur.aurora > .01){
+      s.globalCompositeOperation = 'lighter';
+      const amps = [.9,.7,.6];
+      for (let i=0;i<SW;i++){
+        const x = i/SW; let top = SH, bot = 0, str = 0;
+        for (let k=0;k<3;k++){
+          const yb = hy - SH*(.1+k*.075) + SH*.06*Math.sin(x*5.1 + t*.22 + k) + SH*.025*Math.sin(x*13.7 - t*.34 + k*2.1);
+          const h = SH*(.16 + .07*Math.sin(x*3.3 + t*.14 + k*1.7));
+          const inten = Math.max(0, .5 + .5*Math.sin(x*8.3 + t*.26 + k*2.9) + .25*Math.sin(x*21 - t*.6 + k)) * cur.aurora * amps[k];
+          if (inten <= .02) continue;
+          s.globalAlpha = Math.min(1, inten);
+          s.drawImage(strips[k], i, yb-h, 1.5, h);
+          if (yb-h < top) top = yb-h; if (yb > bot) bot = yb; if (inten > str) str = inten;
+        }
+        band[i] = { top, bot, str };
+      }
+      s.globalCompositeOperation = 'source-over'; s.globalAlpha = 1;
+    } else { for (let i=0;i<SW;i++) band[i] = null; }
+
+    s.fillStyle = rgb(cur.distant);
+    const blocks = [[.22,.8,.012],[.26,.3,.03],[.31,.335,.04],[.42,.47,.035],[.475,.5,.026],[.7,.74,.032],[.745,.8,.022],[.34,.39,.045],[.58,.68,.048]];
+    blocks.forEach(([a,b,h]) => s.fillRect(SW*a, hy-SH*h, SW*(b-a), SH*h+1));
+    s.beginPath(); s.ellipse(SW*.365, hy-SH*.045, SW*.025, SH*.035, 0, Math.PI, 0); s.fill();
+    s.fillRect(SW*.362, hy-SH*.1, SW*.006, SH*.02);
+    s.fillRect(SW*.545, hy-SH*.17, SW*.016, SH*.17);
+    s.beginPath(); s.moveTo(SW*.542, hy-SH*.17); s.lineTo(SW*.564, hy-SH*.17); s.lineTo(SW*.553, hy-SH*.22); s.closePath(); s.fill();
+    [[.597,.012,.022],[.63,.015,.03],[.663,.012,.022]].forEach(([cx,rx,ry]) => { s.beginPath(); s.ellipse(SW*cx, hy-SH*.048, SW*rx, SH*ry, 0, Math.PI, 0); s.fill(); });
+
+    for (let y=hy; y<SH; y++){
+      const d = (y-hy)/(SH-hy);
+      const src = Math.max(0, 2*hy - y - 1);
+      const off = Math.sin(y*.8 + t*1.6)*(.6 + d*2.5) + Math.sin(y*.23 - t*.9)*d*2;
+      s.drawImage(scene, 0, src, SW, 1, off, y, SW, 1);
+    }
+    g = s.createLinearGradient(0,hy,0,SH);
+    g.addColorStop(0, rgb(cur.waterTint,.25)); g.addColorStop(1, rgb(cur.waterTint,.88));
+    s.fillStyle = g; s.fillRect(0,hy,SW,SH-hy);
+
+    // bridge
+    const br = bridge; s.fillStyle = rgb(cur.wall);
+    s.beginPath(); s.moveTo(br.x0, br.y); s.lineTo(br.x0, br.y-SH*.02);
+    s.quadraticCurveTo((br.x0+br.x1)/2, br.y-SH*.07, br.x1, br.y-SH*.02); s.lineTo(br.x1, br.y);
+    s.lineTo(br.x1-SW*.012, br.y); s.quadraticCurveTo((br.x0+br.x1)/2, br.y-SH*.045, br.x0+SW*.012, br.y); s.closePath(); s.fill();
+    s.globalAlpha = .35; s.save(); s.translate(0, 2*br.y); s.scale(1,-1); s.fill(); s.restore(); s.globalAlpha = 1;
+
+    // buildings
+    buildings.forEach(b => {
+      const col = cur[b.wall];
+      s.fillStyle = rgb(col); s.fillRect(b.x0, b.top, b.x1-b.x0, b.base-b.top);
+      s.fillRect(b.x0+(b.x1-b.x0)*.2, b.top-SH*.02, (b.x1-b.x0)*.6, SH*.02);
+      const shade = s.createLinearGradient(b.x0,0,b.x1,0);
+      shade.addColorStop(0,'rgba(0,0,0,.18)'); shade.addColorStop(.5,'rgba(0,0,0,0)'); shade.addColorStop(1,'rgba(0,0,0,.18)');
+      s.fillStyle = shade; s.fillRect(b.x0, b.top, b.x1-b.x0, b.base-b.top);
+      s.fillStyle = rgb(col);
+      b.chim.forEach(f => {
+        const cx = b.x0+(b.x1-b.x0)*f, cw = SW*.009;
+        s.fillRect(cx-cw/2, b.top-SH*.06, cw, SH*.05);
+        s.beginPath(); s.moveTo(cx-cw*1.4, b.top-SH*.075); s.lineTo(cx+cw*1.4, b.top-SH*.075); s.lineTo(cx+cw*.6, b.top-SH*.055); s.lineTo(cx-cw*.6, b.top-SH*.055); s.closePath(); s.fill();
+      });
+      if (cur.rim > .01){
+        s.fillStyle = `rgba(61,255,176,${cur.rim})`;
+        const edge = b.x0===0 ? b.x1-1 : b.x0;
+        s.fillRect(edge, b.top, 1, b.base-b.top);
+      }
+      s.fillStyle = rgb(mix(col,[0,0,0],.25));
+      s.fillRect(b.x0+(b.x1-b.x0)*.25, b.top+(b.base-b.top)*.33, (b.x1-b.x0)*.5, SH*.006);
+    });
+    windows.forEach(w => {
+      const flick = .85 + .15*Math.sin(t*3 + w.seed) * Math.sin(t*1.3 + w.seed*2);
+      const c = w.lit ? mix(cur.winDark, cur.winLit, cur.litAmt*flick) : cur.winDark;
+      s.fillStyle = rgb(c);
+      s.beginPath(); s.moveTo(w.cx-w.w/2, w.y+w.h); s.lineTo(w.cx-w.w/2, w.y+w.w/2);
+      s.arc(w.cx, w.y+w.w/2, w.w/2, Math.PI, 0); s.lineTo(w.cx+w.w/2, w.y+w.h); s.closePath(); s.fill();
+    });
+    const lb = buildings[0];
+    s.fillStyle = rgb(mix(cur.wall,[0,0,0],.5));
+    const dw = (lb.x1-lb.x0)*.22, dx = lb.x0+(lb.x1-lb.x0)*.39;
+    s.beginPath(); s.moveTo(dx, lb.base); s.lineTo(dx, lb.base-SH*.05); s.arc(dx+dw/2, lb.base-SH*.05, dw/2, Math.PI, 0); s.lineTo(dx+dw, lb.base); s.closePath(); s.fill();
+
+    buildings.forEach(b => {
+      const bw = b.x1-b.x0, end = Math.min(SH, b.base + (b.base-b.top));
+      s.globalAlpha = .55;
+      for (let y=Math.ceil(b.base); y<end; y++){
+        const src = Math.max(0, Math.floor(2*b.base - y - 1));
+        const off = Math.sin(y*.9 + t*1.7)*(1+(y-b.base)*.03);
+        s.drawImage(scene, b.x0, src, bw, 1, b.x0+off, y, bw, 1);
+      }
+      s.globalAlpha = 1;
+      const g2 = s.createLinearGradient(0,b.base,0,end);
+      g2.addColorStop(0, rgb(cur.waterTint,.3)); g2.addColorStop(1, rgb(cur.waterTint,.8));
+      s.fillStyle = g2; s.fillRect(b.x0-3, b.base, bw+6, end-b.base);
+    });
+    if (cur.litAmt > .02){
+      s.fillStyle = rgb(cur.winLit);
+      windows.forEach(w => {
+        if (!w.lit) return; const b = buildings[w.b];
+        const flick = .85 + .15*Math.sin(t*3 + w.seed);
+        for (let j=0;j<10;j++){
+          const yy = b.base + 2 + j*2.2 + (b.base - (w.y+w.h))*.6;
+          if (yy > SH) break;
+          const ww = w.w*(.5 + .45*Math.sin(j*1.7 + t*2 + w.seed));
+          s.globalAlpha = cur.litAmt*flick*.55*(1-j/10);
+          s.fillRect(w.cx - ww/2 + Math.sin(j + t*1.4)*1.2, yy, ww, 1.2);
+        }
+      });
+      s.globalAlpha = 1;
+    }
+
+    poles.forEach(p => {
+      const pw = Math.max(2, SW*.008);
+      s.fillStyle = rgb(cur.pole); s.fillRect(p.x, p.top, pw, p.bot-p.top);
+      s.fillStyle = rgb(cur.stripe);
+      for (let k=0;k<3;k++) s.fillRect(p.x, p.top + k*SH*.022, pw, SH*.008);
+      s.globalAlpha = .35; s.fillStyle = rgb(cur.pole); s.fillRect(p.x+Math.sin(t*1.5+p.x)*1, p.bot, pw, SH*.06); s.globalAlpha = 1;
+    });
+
+    const G = gondola, L = G.L, bob = Math.sin(t*.9)*SH*.004;
+    s.save(); s.translate(G.x, G.y + bob); s.rotate(Math.sin(t*.7)*.012);
+    s.fillStyle = rgb(cur.boat); s.strokeStyle = rgb(cur.boat);
+    s.beginPath(); s.moveTo(-L/2, -L*.02); s.quadraticCurveTo(0, L*.09, L/2, -L*.03); s.lineTo(L/2+L*.02, -L*.08);
+    s.quadraticCurveTo(0, L*.035, -L/2+L*.01, -L*.05); s.closePath(); s.fill();
+    s.strokeStyle = rgb(mix(cur.boat, cur.skyHor, .65)); s.lineWidth = Math.max(1, L*.012);
+    s.beginPath(); s.moveTo(-L/2+L*.01, -L*.05); s.quadraticCurveTo(0, L*.035, L/2+L*.02, -L*.08); s.stroke();
+    s.strokeStyle = rgb(cur.boat);
+    s.fillRect(L/2+L*.008, -L*.15, L*.014, L*.08);
+    for (let k=0;k<3;k++) s.fillRect(L/2+L*.02, -L*(.14-k*.022), L*.03, L*.008);
+    s.beginPath(); s.moveTo(-L/2, -L*.02); s.quadraticCurveTo(-L/2-L*.04, -L*.07, -L/2-L*.005, -L*.12); s.lineTo(-L/2+L*.01, -L*.11); s.quadraticCurveTo(-L/2-L*.02, -L*.06, -L/2+L*.02, -L*.04); s.closePath(); s.fill();
+    s.fillRect(-L*.38, -L*.21, L*.045, L*.17);
+    s.beginPath(); s.arc(-L*.358, -L*.235, L*.024, 0, Math.PI*2); s.fill();
+    s.lineWidth = Math.max(1, L*.012); s.beginPath(); s.moveTo(-L*.34, -L*.17); s.lineTo(-L*.22, L*.07); s.stroke();
+    s.fillRect(L*.41, -L*.14, L*.009, L*.1);
+    s.fillStyle = rgb(mix(cur.winDark, [255,200,120], Math.max(cur.litAmt, .3)));
+    s.fillRect(L*.4, -L*.165, L*.03, L*.03);
+    s.restore();
+    G.lx = G.x + L*.415; G.ly = G.y + bob - L*.15;
+    s.globalAlpha = .3; s.fillStyle = rgb(cur.boat);
+    s.beginPath(); s.ellipse(G.x, G.y + bob + L*.06, L*.48, L*.025, 0, 0, Math.PI*2); s.fill(); s.globalAlpha = 1;
+
+    lanterns.forEach(ln => {
+      const by = ln.y + Math.sin(t*1.1 + ln.seed)*1.2, sz = Math.max(2.2, SW*.008);
+      s.fillStyle = rgb(mix([255,200,120], cur.winLit, .4));
+      s.fillRect(ln.x - sz/2, by - sz, sz, sz);
+      s.globalAlpha = .45;
+      for (let j=0;j<5;j++) s.fillRect(ln.x - sz*.4 + Math.sin(j*1.9 + t*2)*1, by + 2 + j*2, sz*.8, 1);
+      s.globalAlpha = 1;
+    });
+  }
+
+  function region(sx, sy){
+    const G = gondola;
+    if (Math.abs(sx - G.x) < G.L*.56 && sy > G.y - G.L*.27 && sy < G.y + G.L*.08) return 1;
+    for (let i=0;i<buildings.length;i++){ const b = buildings[i]; if (sx >= b.x0 && sx <= b.x1 && sy >= b.top - SH*.08 && sy <= b.base) return 1; }
+    for (let i=0;i<poles.length;i++){ const p = poles[i]; if (Math.abs(sx - p.x) < 2.5 && sy >= p.top && sy <= p.bot) return 1; }
+    if (sy >= hy) return 2;
+    if (sy > hy - SH*.23 && sx > SW*.21 && sx < SW*.81 && sy > hy - SH*.06) return 1;
+    const bd = band[sx];
+    if (bd && bd.str > .12 && sy >= bd.top && sy <= bd.bot) return 3;
+    return 0;
+  }
+
+  function paintStrokes(n, sizeMul){
+    if (!data) return;
+    const kx = W/SW, ky = H/SH;
+    const base = dpr * (narrow ? .55 : 1);
+    const ctx = pctx;
+    for (let i=0;i<n;i++){
+      const px = Math.random()*W, py = Math.random()*H;
+      const sx = Math.min(SW-1, (px/kx)|0), sy = Math.min(SH-1, (py/ky)|0);
+      const idx = (sy*SW + sx)*4;
+      let r = data[idx], g = data[idx+1], b = data[idx+2];
+      const ix = (sy*SW + Math.min(SW-1, sx+1))*4, iy = (Math.min(SH-1, sy+1)*SW + sx)*4;
+      const e = Math.min(1, (Math.abs(r-data[ix]) + Math.abs(g-data[ix+1]) + Math.abs(b-data[ix+2]) + Math.abs(r-data[iy]) + Math.abs(g-data[iy+1]) + Math.abs(b-data[iy+2])) / 110);
+      const reg = region(sx, sy);
+      let ang, len, wid;
+      if (reg === 2){ ang = (Math.random()-.5)*.12 + Math.sin(sy*.3 + t*.5)*.05; len = 26 + Math.random()*30; wid = 2.5 + Math.random()*2.5; }
+      else if (reg === 1){ ang = Math.random() < .7 ? Math.PI/2 + (Math.random()-.5)*.2 : (Math.random()-.5)*.2; len = 8 + Math.random()*10; wid = 3 + Math.random()*3; }
+      else if (reg === 3){ ang = Math.PI/2 + (Math.random()-.5)*.25; len = 18 + Math.random()*26; wid = 3 + Math.random()*3; }
+      else { ang = .5*Math.sin(sx*.035 + sy*.06 + t*.05) + (Math.random()-.5)*.3; len = 16 + Math.random()*22; wid = 4 + Math.random()*4; }
+      const f = (1 - .78*e) * sizeMul;
+      len *= f*base; wid *= Math.max(.35, f)*base;
+      const j = (Math.random()-.5)*16;
+      r = clamp255(r + j + (Math.random()-.5)*10); g = clamp255(g + j + (Math.random()-.5)*10); b = clamp255(b + j + (Math.random()-.5)*10);
+      const ca = Math.cos(ang), sa = Math.sin(ang), hl = len/2;
+      const x0 = px - ca*hl, y0 = py - sa*hl, x1 = px + ca*hl, y1 = py + sa*hl;
+      const bend = (Math.random()-.5)*len*.25;
+      const cx = px - sa*bend, cy = py + ca*bend;
+      ctx.strokeStyle = `rgba(${r|0},${g|0},${b|0},${(.72 + Math.random()*.25).toFixed(2)})`;
+      ctx.lineWidth = wid;
+      ctx.beginPath(); ctx.moveTo(x0,y0); ctx.quadraticCurveTo(cx,cy,x1,y1); ctx.stroke();
+      const roll = Math.random();
+      if (roll < .3){
+        const o = wid*.3;
+        ctx.strokeStyle = 'rgba(255,255,255,.09)'; ctx.lineWidth = wid*.3;
+        ctx.beginPath(); ctx.moveTo(x0-o,y0-o); ctx.quadraticCurveTo(cx-o,cy-o,x1-o,y1-o); ctx.stroke();
+      } else if (roll < .45){
+        const o = wid*.35;
+        ctx.strokeStyle = 'rgba(0,0,0,.12)'; ctx.lineWidth = wid*.3;
+        ctx.beginPath(); ctx.moveTo(x0+o,y0+o); ctx.quadraticCurveTo(cx+o,cy+o,x1+o,y1+o); ctx.stroke();
+      }
+    }
+  }
+
+  function drawLights(){
+    const c = lctx, kx = W/SW, ky = H/SH;
+    c.clearRect(0,0,W,H);
+    c.globalCompositeOperation = 'lighter';
+    if (cur.stars > .02){
+      c.fillStyle = '#EEF2FF';
+      stars.forEach(st => {
+        const a = cur.stars * (.35 + .65*Math.abs(Math.sin(t*.8 + st.seed)));
+        c.globalAlpha = a; const r = st.r*dpr;
+        c.fillRect(st.x*W - r/2, st.y*H - r/2, r, r);
+      });
+    }
+    if (cur.litAmt > .02){
+      windows.forEach(w => {
+        if (!w.lit) return;
+        const flick = .8 + .2*Math.sin(t*3 + w.seed);
+        const R = w.w*kx*2.4;
+        c.globalAlpha = .38*cur.litAmt*flick;
+        c.drawImage(glowWarm, w.cx*kx - R, (w.y+w.h*.5)*ky - R, R*2, R*2);
+      });
+      distantLights.forEach(dl => {
+        c.globalAlpha = cur.litAmt*(.4 + .4*Math.sin(t*1.7 + dl.seed));
+        const R = 5*dpr; c.drawImage(glowWarm, dl.x*kx - R, dl.y*ky - R, R*2, R*2);
+      });
+    }
+    const lampA = Math.max(cur.litAmt, .25);
+    const G = gondola, gR = G.L*kx*.22, gflick = .85 + .15*Math.sin(t*4.1);
+    c.globalAlpha = .75*lampA*gflick; c.drawImage(glowWarm, G.lx*kx - gR, G.ly*ky - gR, gR*2, gR*2);
+    c.globalAlpha = .35*lampA*gflick; c.drawImage(glowWarm, G.lx*kx - gR*.5, (G.ly + G.L*.3)*ky - gR*1.4, gR, gR*2.8);
+    lanterns.forEach(ln => {
+      const R = Math.max(14*dpr, SW*.03*kx), fl = .8 + .2*Math.sin(t*3.3 + ln.seed);
+      const by = ln.y + Math.sin(t*1.1 + ln.seed)*1.2;
+      c.globalAlpha = .7*lampA*fl; c.drawImage(glowWarm, ln.x*kx - R, (by-1)*ky - R, R*2, R*2);
+      c.globalAlpha = .3*lampA*fl; c.drawImage(glowWarm, ln.x*kx - R*.4, (by+4)*ky - R, R*.8, R*2.4);
+    });
+    if (cur.sun > .05){
+      const cx = cur.sunX*W;
+      for (let i=0;i<34;i++){
+        const d = Math.random();
+        const y = hy*ky + d*(H - hy*ky);
+        const x = cx + (Math.random()-.5)*W*.1*(1 + d*2.5);
+        const R = (2 + Math.random()*4)*dpr;
+        c.globalAlpha = cur.sun*.55*Math.random();
+        c.drawImage(glowWhite, x-R, y-R, R*2, R*2);
+      }
+    }
+    c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+  }
+
+  function update(dt){
+    lanterns.forEach(ln => { ln.x += ln.vx*dt; });
+    lanterns = lanterns.filter(ln => ln.x < SW + 10);
+    if (lanterns.length < 2 && running && cur.litAmt > .3 && Math.random() < dt*.15) addLantern(-4, hy + (SH-hy)*(.15 + Math.random()*.6));
+  }
+
+  let last = performance.now();
+  function frame(now){
+    const dt = Math.min(.05, (now-last)/1000); last = now;
+    const animate = running && visible;
+    const settling = settle < 110;
+    if (animate || settling){
+      if (animate){ t += dt; update(dt); lerpPal(1 - Math.pow(.25, dt)); }
+      else { lerpPal(.2); }
+      drawScene();
+      data = sctx.getImageData(0,0,SW,SH).data;
+      const reveal = Math.max(0, 1 - frames/90);
+      const t0 = performance.now();
+      paintStrokes(Math.round(budget*(1 + reveal*.8)), 1 + reveal*1.6);
+      const cost = performance.now() - t0;
+      if (cost > 12) budget = Math.max(300, budget*.92); else if (cost < 6) budget = Math.min(maxBudget, budget*1.04);
+      drawLights();
+      frames++;
+      if (!animate) settle++;
+    }
+    requestAnimationFrame(frame);
+  }
+
+  document.querySelectorAll('.seg button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+      target = PALETTES[btn.dataset.mode];
+      settle = 0;
+    });
+  });
+  const motionBtn = document.getElementById('motionBtn');
+  function syncMotionBtn(){ motionBtn.textContent = running ? 'Pause motion' : 'Play motion'; motionBtn.setAttribute('aria-pressed', String(!running)); }
+  motionBtn.addEventListener('click', () => { running = !running; settle = 0; syncMotionBtn(); });
+  syncMotionBtn();
+  document.getElementById('lanternBtn').addEventListener('click', () => addLantern(SW*(.05 + Math.random()*.2), hy + (SH-hy)*(.2 + Math.random()*.55)));
+  paint.style.pointerEvents = 'auto';
+  hero.addEventListener('click', e => {
+    if (e.target.closest('button, a')) return;
+    const r = hero.getBoundingClientRect();
+    const sx = (e.clientX - r.left)/r.width*SW, sy = (e.clientY - r.top)/r.height*SH;
+    if (sy > hy + 2) addLantern(sx, sy);
+  });
+
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(entries => { visible = entries[0].isIntersecting; }, { threshold: 0 }).observe(hero);
+  }
+  let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(resize, 150); });
+  reduceMQ.addEventListener && reduceMQ.addEventListener('change', e => { running = !e.matches; settle = 0; syncMotionBtn(); });
+
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
