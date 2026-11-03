@@ -1,26 +1,85 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+ * Design tokens for the "Night" concept.
+ *
+ * In Tailwind v4 the theme lives in CSS. Every `--color-<name>` below becomes
+ * utilities like `bg-<name>`, `text-<name>`, and `border-<name>`, and is also
+ * available as a plain CSS variable, e.g. `var(--color-brass)`, for canvas and
+ * SVG code.
+ *
+ * Contrast (WCAG 2), text color on background. AA needs 4.5:1 for body text.
+ *
+ *   text        on night   on panel
+ *   starlight     15.93      13.15
+ *   haze          12.38      10.21
+ *   aurora        14.45      11.93
+ *   teal          10.11       8.34
+ *   brass          9.92       8.18
+ *   mist           9.01       7.44
+ *   magenta        7.64       6.31
+ *   violet         4.44       3.67   <- fails AA: decorative only, never text
+ */
+@theme {
+  /* Remove Tailwind's built-in palette (zinc-500, blue-600, ...) so only the
+     colors below exist. `transparent`, `current`, and `inherit` are not theme
+     colors, so they keep working. */
+  --color-*: initial;
+
+  /* Night palette */
+  --color-night: #0b1026; /* page background */
+  --color-panel: #1a2147; /* cards and raised surfaces */
+  --color-aurora: #3dffb0; /* primary accent, focus rings */
+  --color-teal: #2dd4bf;
+  --color-violet: #8b5cf6; /* decorative only, never text */
+  --color-magenta: #e879f9; /* use sparingly */
+  --color-starlight: #e8ecf8; /* primary text */
+  --color-brass: #e0b66a; /* accent: placards, string dividers */
+
+  /* Neutrals */
+  --color-haze: #c9d1ec; /* secondary text, like body copy in cards */
+  --color-mist: #a9b3d1; /* muted text: dates, labels, captions */
+  --color-line: #222b5a; /* borders and dividers between sections */
+  --color-deep: #05081a; /* darkest shade, for scrims behind text over the hero */
 }
 
+/*
+ * Fonts. next/font sets `--font-inter` and `--font-fraunces` on <html> (see
+ * layout.tsx). `inline` makes the utilities use those variables directly
+ * instead of resolving them where the theme is defined.
+ *
+ * `--font-sans` is Tailwind's default font, so body text is Inter with no
+ * class needed. Headings use the `font-heading` utility (Fraunces).
+ */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-fraunces), ui-serif, Georgia, serif;
 }
 
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    /* Tells the browser the page is dark, so scrollbars and form controls
+       are drawn dark too. */
+    color-scheme: dark;
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  body {
+    @apply bg-night text-starlight;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-heading;
+  }
+
+  /* Keyboard focus ring. `:focus-visible` shows it for keyboard users but not
+     on mouse clicks. The offset keeps it clear of the element's own edge. */
+  :focus-visible {
+    outline: 2px solid var(--color-aurora);
+    outline-offset: 3px;
+  }
 }
