@@ -16,6 +16,8 @@
  *   --no-modes       skip the per-mode contrast pass
  *   --rotation       also run the rotation test (running, paused, reduced motion)
  *   --perf           also run the 4x CPU-throttled phone check
+ *   --still          also run the still-frame checks (#6): with reduced motion
+ *                    or Pause motion, the painting never fills in or moves
  *
  * Output goes to hero-measurements/ (git-ignored): one screenshot per viewport
  * and mode, rotation frames, and <label>-report.json. A summary is printed at
@@ -32,6 +34,10 @@
  *   best color must reach 3:1 against the painting just outside it.
  * - Pill edges: the light border or the dark ring outside it must reach 3:1
  *   against the painting 3.5px out.
+ * - Still frames: stroke() calls on canvases in the page are counted per
+ *   frame (an off-screen still's strokes are counted separately), drawImage
+ *   onto the paint canvas marks a still being swapped in, and the canvases
+ *   are hashed every 50 ms to count how many distinct states a visitor saw.
  *
  * Needs Node 22+ (for the global WebSocket) and Chrome or Edge. Set
  * BROWSER_PATH if the browser isn't found. No npm dependencies: it speaks the
@@ -51,6 +57,7 @@ const { values: args } = parseArgs({
     "no-modes": { type: "boolean", default: false },
     rotation: { type: "boolean", default: false },
     perf: { type: "boolean", default: false },
+    still: { type: "boolean", default: false },
   },
 });
 
@@ -411,22 +418,117 @@ const LAYOUT = String.raw`(() => {
 })()`;
 
 /*
- * Rotation and performance instrumentation, installed before the page loads:
- * counts stroke() calls per animation frame, and frame timestamps.
+ * Instrumentation, installed before the page loads:
+ * - __frames: per animation frame, its timestamp and the stroke() calls on
+ *   canvases in the page (what a visitor can see being painted). Strokes on
+ *   detached canvases, like an off-screen still, aren't counted here.
+ * - __counts: running totals of stroke() calls, visible and off screen.
+ * - __events: drawImage calls on the visible paint canvas. A 3-argument
+ *   drawImage of a whole canvas is a still being swapped in ("swap"); the
+ *   5-argument one is the stretched copy after a resize ("stretch").
+ * - __longTasks: main-thread tasks over 50 ms.
  */
 const INSTRUMENT = String.raw`
 (() => {
   window.__frames = [];
+  window.__counts = { visible: 0, offscreen: 0 };
+  window.__events = [];
+  window.__longTasks = [];
   let strokes = 0;
-  const stroke = CanvasRenderingContext2D.prototype.stroke;
-  CanvasRenderingContext2D.prototype.stroke = function (...a) { strokes++; return stroke.apply(this, a); };
+  const proto = CanvasRenderingContext2D.prototype;
+  const stroke = proto.stroke;
+  proto.stroke = function (...a) {
+    if (this.canvas.isConnected) { strokes++; window.__counts.visible++; }
+    else window.__counts.offscreen++;
+    return stroke.apply(this, a);
+  };
+  const drawImage = proto.drawImage;
+  proto.drawImage = function (...a) {
+    if (this.canvas.isConnected && this.canvas.getAttribute("role") === "img") {
+      window.__events.push({ t: performance.now(), kind: a.length === 3 ? "swap" : "stretch" });
+    }
+    return drawImage.apply(this, a);
+  };
   const raf = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = (cb) => raf((ts) => {
     window.__frames.push({ ts, strokes });
     strokes = 0;
     cb(ts);
   });
+  try {
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) window.__longTasks.push({ t: e.startTime, ms: e.duration });
+    }).observe({ type: "longtask", buffered: true });
+  } catch {}
 })();`;
+
+/**
+ * A hash of the visible paint and light canvases at full resolution, to
+ * tell whether anything on screen changed.
+ *
+ * Take one throwaway reading first. After the first getImageData, Chrome
+ * may move a canvas from the GPU into regular memory, and the light layer's
+ * faint, semi-transparent glows can then read back a step different even
+ * though nothing was drawn. Screenshots (what the visitor sees) don't change.
+ */
+const SNAP = String.raw`(() => {
+  let h = 2166136261;
+  for (const c of document.querySelectorAll("section canvas")) {
+    const d = new Uint32Array(c.getContext("2d").getImageData(0, 0, c.width, c.height).data.buffer);
+    for (let i = 0; i < d.length; i++) h = Math.imul(h ^ d[i], 16777619);
+  }
+  return h >>> 0;
+})()`;
+
+/** Saves the paint canvas's pixels, so DIFF_BOX can compare against them later. */
+const SAVE_PAINT = String.raw`(() => {
+  const c = document.querySelector("section canvas");
+  window.__saved = c.getContext("2d").getImageData(0, 0, c.width, c.height).data.slice();
+})()`;
+
+/** Bounding box (device pixels) of every paint-canvas pixel that changed since SAVE_PAINT. */
+const DIFF_BOX = String.raw`(() => {
+  const c = document.querySelector("section canvas");
+  const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+  const s = window.__saved;
+  let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1, n = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i] !== s[i] || d[i + 1] !== s[i + 1] || d[i + 2] !== s[i + 2]) {
+      const p = i / 4, x = p % c.width, y = (p / c.width) | 0;
+      n++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+  }
+  return n ? { changed: n, width: x1 - x0 + 1, height: y1 - y0 + 1, share: +(n / (d.length / 4)).toFixed(4) } : { changed: 0 };
+})()`;
+
+/**
+ * Samples SNAP every 50 ms (on a timer, not requestAnimationFrame, so it
+ * doesn't count as a frame) and keeps the list of distinct states in order.
+ * An off-screen still shows up as exactly one change; a canvas filling in
+ * shows up as many.
+ */
+const START_SAMPLER = String.raw`(() => {
+  const snap = () => ${SNAP};
+  snap();
+  window.__states = [snap()];
+  window.__sampler = setInterval(() => {
+    const h = snap();
+    if (h !== window.__states.at(-1)) window.__states.push(h);
+  }, 50);
+})()`;
+const STOP_SAMPLER = String.raw`(() => { clearInterval(window.__sampler); return window.__states.length; })()`;
+
+/** Resolves when a still is swapped in after `since` (ms), or null after `timeout` ms. */
+const WAIT_FOR_SWAP = String.raw`(since, timeout) => new Promise((resolve) => {
+  const start = performance.now();
+  const check = () => {
+    const swap = window.__events.find((e) => e.kind === "swap" && e.t > since);
+    if (swap) resolve(swap.t);
+    else if (performance.now() - start > timeout) resolve(null);
+    else setTimeout(check, 20);
+  };
+  check();
+})`;
 
 /** Share of the visible paint canvas still showing the bare Night underpaint. */
 const UNDERPAINT_SHARE = String.raw`(() => {
@@ -625,6 +727,225 @@ async function perfTest(cdp) {
   return out;
 }
 
+async function setReducedMotion(cdp, on) {
+  await cdp.send("Emulation.setEmulatedMedia", {
+    features: [{ name: "prefers-reduced-motion", value: on ? "reduce" : "no-preference" }],
+  });
+}
+
+/** Animation frames that ran in the next `ms` milliseconds (0 means the loop is stopped). */
+async function framesDuring(cdp, ms) {
+  await cdp.evaluate(`window.__frames.splice(0)`);
+  await sleep(ms);
+  return (await cdp.evaluate(`window.__frames.splice(0)`)).length;
+}
+
+const now = (cdp) => cdp.evaluate(`performance.now()`);
+const visibleStrokes = (cdp) => cdp.evaluate(`window.__counts.visible`);
+const pausePressed = (cdp) =>
+  cdp.evaluate(`[...document.querySelectorAll("section button")].find((b) => b.textContent.trim() === "Pause motion").getAttribute("aria-pressed")`);
+
+/**
+ * Runs `action` while sampling the canvases, and reports what a paused
+ * visitor would see: visible strokes (should be 0), the distinct canvas
+ * states sampled (2 = one clean swap), and how long until the still landed.
+ *
+ * `fromLive`: the action pauses a running painting. A frame already in
+ * flight may still paint, so strokes are only counted in frames that start
+ * over 100 ms after the action, and sampling starts then too (so a still
+ * that lands within those 100 ms shows as 1 state, not 2).
+ */
+async function pausedChange(cdp, action, { fromLive = false, timeout = 15000 } = {}) {
+  await cdp.evaluate(`window.__frames.splice(0)`);
+  const before = await visibleStrokes(cdp);
+  if (!fromLive) await cdp.evaluate(START_SAMPLER);
+  const start = await now(cdp);
+  await action();
+  if (fromLive) {
+    await sleep(100);
+    await cdp.evaluate(START_SAMPLER);
+  }
+  const swapAt = await cdp.evaluate(`(${WAIT_FOR_SWAP})(${start}, ${timeout})`);
+  await sleep(300);
+  const states = await cdp.evaluate(STOP_SAMPLER);
+  const frames = await cdp.evaluate(`window.__frames.splice(0)`);
+  const events = await cdp.evaluate(`window.__events.filter((e) => e.t > ${start}).map((e) => e.kind)`);
+  return {
+    msToStill: swapAt === null ? null : Math.round(swapAt - start),
+    visibleStrokes: fromLive
+      ? frames.filter((f) => f.ts > start + 100).reduce((sum, f) => sum + f.strokes, 0)
+      : (await visibleStrokes(cdp)) - before,
+    states,
+    events,
+    framesAfter: await framesDuring(cdp, 1000),
+  };
+}
+
+/**
+ * The still-frame checks for #6. With reduced motion (or Pause motion), the
+ * painting must never fill in or move: no strokes on the visible canvas, the
+ * finished still swapped in at once, and no frames running afterward.
+ */
+async function stillTest(cdp) {
+  const out = {};
+  const desktop = VIEWPORTS.find((v) => v.name === "desktop");
+  const phone = VIEWPORTS.find((v) => v.name === "phone");
+  const landscape = VIEWPORTS.find((v) => v.name === "phone-landscape");
+
+  // First load with reduced motion, at full speed and on a slow phone.
+  for (const [vp, rate] of [[desktop, 1], [phone, 1], [phone, 4]]) {
+    const key = `firstLoad-${vp.name}-cpu${rate}x`;
+    process.stdout.write(`  ${key}\n`);
+    await setReducedMotion(cdp, true);
+    await setViewport(cdp, vp);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate });
+    await cdp.send("Page.navigate", { url: args.url });
+    await sleep(300);
+    const swapAt = await cdp.evaluate(`(${WAIT_FOR_SWAP})(0, 20000)`);
+    const fcp = await cdp.evaluate(`performance.getEntriesByName("first-contentful-paint")[0]?.startTime ?? null`);
+    const longTasks = await cdp.evaluate(`window.__longTasks.filter((e) => e.t < ${swapAt ?? 0} + 100).map((e) => Math.round(e.ms))`);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+    await sleep(300);
+    // Screenshots first: reading the canvases back (SNAP) can itself change
+    // how Chrome composites the light layer, by a step (see SNAP).
+    const shotBefore = await screenshot(cdp);
+    const framesAfter = await framesDuring(cdp, 1500);
+    const screenChangedWhileSettled = shotBefore !== (await screenshot(cdp));
+    await cdp.evaluate(SNAP);
+    const snapBefore = await cdp.evaluate(SNAP);
+    await sleep(500);
+    out[key] = {
+      msToStill: swapAt === null ? null : Math.round(swapAt),
+      fcp: fcp === null ? null : Math.round(fcp),
+      visibleStrokes: await visibleStrokes(cdp),
+      offscreenStrokes: await cdp.evaluate(`window.__counts.offscreen`),
+      swaps: (await cdp.evaluate(`window.__events`)).filter((e) => e.kind === "swap").length,
+      longestTaskMs: longTasks.length ? Math.max(...longTasks) : 0,
+      longTasks: longTasks.length,
+      framesAfter,
+      screenChangedWhileSettled,
+      canvasChangedWhileSettled: snapBefore !== (await cdp.evaluate(SNAP)),
+      underpaintShare: await cdp.evaluate(UNDERPAINT_SHARE),
+      pausePressed: await pausePressed(cdp),
+    };
+    await screenshot(cdp, `${args.label}-still-${vp.name}-cpu${rate}x-night.png`);
+  }
+
+  // Still on the phone with reduced motion: mode changes, lanterns, rotation.
+  await setViewport(cdp, phone, { type: "portraitPrimary", angle: 0 });
+  await load(cdp);
+  await cdp.evaluate(`(${WAIT_FOR_SWAP})(0, 15000)`);
+  await sleep(300);
+  for (const mode of [...MODES.slice(1), MODES[0]]) {
+    process.stdout.write(`  mode ${mode.slug} (reduced)\n`);
+    out[`mode-${mode.slug}`] = await pausedChange(cdp, () => clickButton(cdp, mode.label));
+    await screenshot(cdp, `${args.label}-still-phone-${mode.slug}.png`);
+  }
+
+  process.stdout.write("  lanterns (reduced)\n");
+  for (const [name, action] of [
+    ["button", () => clickButton(cdp, "Float a lantern")],
+    ["water", async () => {
+      const at = { x: Math.round(phone.width * 0.75), y: Math.round(phone.height * 0.6), button: "left", clickCount: 1 };
+      await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...at });
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...at });
+    }],
+  ]) {
+    await cdp.evaluate(SAVE_PAINT);
+    const before = await visibleStrokes(cdp);
+    await cdp.evaluate(`window.__frames.splice(0)`);
+    await action();
+    await sleep(300);
+    const frames = await cdp.evaluate(`window.__frames.splice(0)`);
+    out[`lantern-${name}`] = {
+      visibleStrokes: (await visibleStrokes(cdp)) - before,
+      framesWithStrokes: frames.filter((f) => f.strokes > 0).length,
+      changedBox: await cdp.evaluate(DIFF_BOX),
+      framesAfter: await framesDuring(cdp, 1000),
+      pausePressed: await pausePressed(cdp),
+    };
+  }
+  await screenshot(cdp, `${args.label}-still-phone-lanterns.png`);
+
+  for (const [vp, orientation] of [
+    [landscape, { type: "landscapePrimary", angle: 90 }],
+    [phone, { type: "portraitPrimary", angle: 0 }],
+  ]) {
+    process.stdout.write(`  rotate to ${vp.name} (reduced)\n`);
+    out[`rotate-${vp.name}`] = await pausedChange(cdp, () => setViewport(cdp, vp, orientation));
+    await screenshot(cdp, `${args.label}-still-rotate-${vp.name}.png`);
+  }
+
+  // Motion on, then Pause motion pressed on a finished painting: it should
+  // stop at once, with no catch-up strokes.
+  process.stdout.write("  pause a finished painting\n");
+  await setReducedMotion(cdp, false);
+  await setViewport(cdp, desktop);
+  await load(cdp);
+  await sleep(6000);
+  await cdp.evaluate(`window.__frames.splice(0)`);
+  const pressedAt = await now(cdp);
+  await clickButton(cdp, "Pause motion");
+  await sleep(100);
+  const inFlight = (await cdp.evaluate(`window.__frames.splice(0)`)).filter((f) => f.ts > pressedAt && f.strokes > 0);
+  // Screenshots before any canvas readback (see SNAP).
+  const pauseShot = await screenshot(cdp);
+  const pauseFrames = await framesDuring(cdp, 1500);
+  const screenChanged = pauseShot !== (await screenshot(cdp));
+  await cdp.evaluate(START_SAMPLER);
+  await sleep(1000);
+  out.pauseFinished = {
+    // At most the one frame already under way when the click landed.
+    framesWithStrokesAfterPress: inFlight.length,
+    swaps: (await cdp.evaluate(`window.__events.filter((e) => e.t > ${pressedAt})`)).length,
+    framesAfter: pauseFrames,
+    screenChanged,
+    states: await cdp.evaluate(STOP_SAMPLER),
+  };
+  await screenshot(cdp, `${args.label}-still-paused-live-desktop.png`);
+  process.stdout.write("  mode change while paused (Pause motion)\n");
+  out.pausedMode = await pausedChange(cdp, () => clickButton(cdp, "Day"));
+  await screenshot(cdp, `${args.label}-still-desktop-day.png`);
+  await clickButton(cdp, "Night");
+
+  // Pause during the opening reveal, then resume: a still lands, and
+  // resuming doesn't replay the reveal over it.
+  process.stdout.write("  pause during the reveal, then resume\n");
+  await load(cdp);
+  out.pauseDuringReveal = await pausedChange(cdp, () => clickButton(cdp, "Pause motion"), { fromLive: true });
+  await cdp.evaluate(`window.__frames.splice(0)`);
+  await clickButton(cdp, "Pause motion");
+  await sleep(2500);
+  const resumed = (await cdp.evaluate(`window.__frames.splice(0)`)).filter((f) => f.strokes > 0);
+  const early = strokeStats(resumed.slice(0, 20));
+  const settled = strokeStats(resumed.slice(-20));
+  out.pauseDuringReveal.resumeEarlyVsSettled = settled.median ? +(early.max / settled.median).toFixed(2) : null;
+
+  // The OS setting turned on mid-reveal, without a reload.
+  process.stdout.write("  reduced motion turned on mid-reveal\n");
+  await load(cdp);
+  out.osSettingMidReveal = await pausedChange(cdp, () => setReducedMotion(cdp, true), { fromLive: true });
+  out.osSettingMidReveal.pausePressed = await pausePressed(cdp);
+
+  // Before hydration (scripts off): the Pause button's look must already
+  // match the engine, which starts paused with reduced motion.
+  process.stdout.write("  Pause button before hydration\n");
+  await cdp.send("Emulation.setScriptExecutionDisabled", { value: true });
+  out.beforeHydration = {};
+  for (const on of [true, false]) {
+    await setReducedMotion(cdp, on);
+    await cdp.send("Page.navigate", { url: args.url });
+    await sleep(1500);
+    out.beforeHydration[on ? "reduced" : "noPreference"] = await cdp.evaluate(
+      `(() => { const b = [...document.querySelectorAll("section button")].find((x) => x.textContent.trim() === "Pause motion"); const s = getComputedStyle(b); return { background: s.backgroundColor, color: s.color, ariaPressed: b.getAttribute("aria-pressed") }; })()`,
+    );
+    await screenshot(cdp, `${args.label}-still-no-js-${on ? "reduced" : "no-preference"}.png`);
+  }
+  await cdp.send("Emulation.setScriptExecutionDisabled", { value: false });
+  await cdp.send("Emulation.setEmulatedMedia", { features: [] });
+  return out;
+}
+
 function summarize(report) {
   const lines = [];
   const mark = (value, bar) => (value === null || value === undefined ? "  n/a" : `${value.toFixed(2).padStart(5)}${value >= bar ? " " : "*"}`);
@@ -671,6 +992,16 @@ function summarize(report) {
   for (const [rate, p] of Object.entries(report.perf ?? {})) {
     lines.push(`perf phone ${rate}: ${p.fps} fps, strokes/frame median ${p.median}`);
   }
+  for (const [name, r] of Object.entries(report.still ?? {})) {
+    if (name === "beforeHydration") {
+      for (const [media, b] of Object.entries(r)) {
+        lines.push(`still ${"before hydration, " + media}: Pause button ${b.background} / ${b.color}, aria-pressed ${b.ariaPressed}`);
+      }
+      continue;
+    }
+    const parts = Object.entries(r).map(([k, v]) => `${k} ${typeof v === "object" && v !== null ? JSON.stringify(v) : v}`);
+    lines.push(`still ${name}: ${parts.join(", ")}`);
+  }
   lines.push(failures ? `${failures} check(s) below the bar.` : "All contrast and layout checks pass.");
   return lines.join("\n");
 }
@@ -699,6 +1030,10 @@ try {
   if (args.perf) {
     process.stdout.write("performance...\n");
     report.perf = await perfTest(cdp);
+  }
+  if (args.still) {
+    process.stdout.write("still frames...\n");
+    report.still = await stillTest(cdp);
   }
 } finally {
   cdp.close();

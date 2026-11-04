@@ -131,14 +131,15 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
    * phone in landscape, the hero grows taller instead.
    *
    * The controls and text need `relative` to paint above the absolutely
-   * positioned canvases. `data-mode` lets the text scrim change with the
-   * mode (see below).
+   * positioned canvases. `data-mode` and `data-paused` let the text scrim
+   * change with the mode and motion setting (see below).
    */
   return (
     <section
       ref={heroRef}
       aria-labelledby={titleId}
       data-mode={mode}
+      data-paused={paused ? "" : undefined}
       onClick={handleHeroClick}
       className="group/hero relative flex min-h-[min(100svh,1100px)] flex-col justify-between gap-8 overflow-hidden bg-deep px-[clamp(16px,4vw,48px)] pt-[clamp(16px,3vh,28px)] pb-[clamp(36px,8vh,80px)] text-starlight"
     >
@@ -194,12 +195,22 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
         <button type="button" onClick={() => painterRef.current?.floatLantern()} className={chipStyle}>
           Float a lantern
         </button>
-        {/* The label stays the same; aria-pressed (and the pressed style) shows the state. */}
+        {/*
+          The label stays the same; aria-pressed (and the pressed style) shows
+          the state.
+
+          Before hydration React can't know about reduced motion (the server
+          renders aria-pressed="false"), but CSS can. While the visitor
+          hasn't chosen (`data-follows-system`), `motion-reduce:` gives the
+          button its pressed look from the first paint, matching the engine,
+          which is already paused. After hydration aria-pressed agrees.
+        */}
         <button
           type="button"
           aria-pressed={paused}
+          data-follows-system={userPaused === null ? "" : undefined}
           onClick={() => setUserPaused(!paused)}
-          className={chipStyle}
+          className={`${chipStyle} data-follows-system:motion-reduce:bg-starlight data-follows-system:motion-reduce:text-night`}
         >
           Pause motion
         </button>
@@ -224,11 +235,13 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
           visible edge. It belongs to the text block, so it follows the text
           on any screen size. It is strongest in Day, where the painting is
           brightest, and fades between modes over about the time the painting
-          takes to blend. ADR-007 has the measurements behind these values.
+          takes to blend. While paused, the painting changes mode all at
+          once, so the scrim does too. ADR-007 has the measurements behind
+          these values.
         */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute -inset-x-[40%] -inset-y-36 -z-10 bg-[radial-gradient(closest-side,var(--color-deep)_55%,rgb(5_8_26/0.5)_78%,transparent)] opacity-50 transition-opacity duration-1000 group-data-[mode=day]/hero:opacity-80 group-data-[mode=golden]/hero:opacity-60 motion-reduce:transition-none"
+          className="pointer-events-none absolute -inset-x-[40%] -inset-y-36 -z-10 bg-[radial-gradient(closest-side,var(--color-deep)_55%,rgb(5_8_26/0.5)_78%,transparent)] opacity-50 transition-opacity duration-1000 group-data-[mode=day]/hero:opacity-80 group-data-[mode=golden]/hero:opacity-60 group-data-paused/hero:transition-none motion-reduce:transition-none"
         />
         {children}
       </div>
