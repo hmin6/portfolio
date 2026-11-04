@@ -58,3 +58,7 @@ Never present unbuilt features as finished. Hackathon projects are not shown on 
   in first person from my answers. Keep my wording where possible.
 - Record major technical decisions as ADRs in docs/decisions/, following
   docs/decisions/TEMPLATE.md, numbered ADR-001, ADR-002, and so on.
+- When I report the results of manual checks (for example on my phone or by tabbing
+  through the page), update the PR description's checklist with `gh pr edit`: tick the
+  boxes I confirmed and add a short note of what I tested. Never tick a box I haven't
+  confirmed.
