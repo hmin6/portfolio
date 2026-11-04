@@ -7,9 +7,12 @@ export default function Home() {
   return (
     <main className="flex-1">
       <PaintedHero titleId="hero-title">
+        {/* 9vw (at least 52px, at most 112px) as before, but never more than
+            15% of the screen's height, so the name fits on a phone in
+            landscape. 40px is the floor for very short screens. */}
         <h1
           id="hero-title"
-          className="text-[clamp(52px,9vw,112px)] leading-[0.95] font-normal tracking-[-0.02em]"
+          className="text-[clamp(40px,min(max(52px,9vw),15svh),112px)] leading-[0.95] font-normal tracking-[-0.02em]"
         >
           Harrison Min
         </h1>

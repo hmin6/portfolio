@@ -49,6 +49,17 @@
 }
 
 /*
+ * The dark bands of the two-color focus ring (see :focus-visible below), as
+ * a theme shadow so components can use it too, as `shadow-focus`. A 2px band
+ * fills the gap between the element and the aurora outline, and a 1px band
+ * sits outside the outline. `static`, like the colors above, so the variable
+ * is always output for the base style to read.
+ */
+@theme static {
+  --shadow-focus: 0 0 0 2px var(--color-deep), 0 0 0 5px var(--color-deep);
+}
+
+/*
  * Fonts. next/font sets `--font-inter` and `--font-fraunces` on <html> (see
  * layout.tsx). `inline` makes the utilities use those variables directly
  * instead of resolving them where the theme is defined.
@@ -82,9 +93,20 @@
   }
 
   /* Keyboard focus ring. `:focus-visible` shows it for keyboard users but not
-     on mouse clicks. The offset keeps it clear of the element's own edge. */
+     on mouse clicks.
+
+     Two colors (WCAG technique C40): an aurora outline between two dark
+     bands. Aurora on deep is about 15:1, and whatever is behind the ring,
+     one of the two has at least 3:1 against it: aurora over dark night sky,
+     deep over bright day sky. A single aurora ring measured as low as 1.6:1
+     over the Day sky.
+
+     The dark bands are a box-shadow. Utilities beat this base style, so an
+     element with its own `shadow-*` or `ring-*` class needs
+     `focus-visible:shadow-focus` to keep them. */
   :focus-visible {
     outline: 2px solid var(--color-aurora);
-    outline-offset: 3px;
+    outline-offset: 2px;
+    box-shadow: var(--shadow-focus);
   }
 }

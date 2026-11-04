@@ -47,9 +47,9 @@ export function paintStrokes(input: StrokeInput, count: number, sizeMul: number)
   // Device pixels per scene pixel.
   const kx = W / SW;
   const ky = H / SH;
-  // Stroke sizes below are in CSS pixels; scale to device pixels. Narrow
-  // screens get finer strokes so the small scene still shows detail.
-  const base = view.dpr * (view.narrow ? 0.55 : 1);
+  // Stroke sizes below are in CSS pixels at the reference desktop size;
+  // scale them to this screen's scene pixels, then to device pixels.
+  const base = view.dpr * view.strokeScale;
 
   for (let i = 0; i < count; i++) {
     const px = area.x + Math.random() * area.width;

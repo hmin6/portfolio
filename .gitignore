@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# hero measurement output (scripts/measure-hero.mjs)
+/hero-measurements/
