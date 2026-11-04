@@ -38,9 +38,10 @@ Testing #20 on my phone showed that with Pause motion on, rotating or changing t
   the page, so the render runs in chunks of about 8 ms and yields to the browser between
   them with `scheduler.yield()`. Clicks and taps stay responsive, and no chunk comes near
   the 50 ms long-task line.
-- **Fast can break assumptions in tests.** `scheduler.yield()` let the still finish
-  sooner than the test expected, so the test's own timing had to be fixed. The test is
-  part of the system, and a speed-up can surface bugs in it.
+- **The browser's scheduler can starve your own test code.** `scheduler.yield()` runs
+  the still ahead of ordinary timers, so my 50 ms sampler never fired while the still
+  was painting. Input and rendering still got their turn, but I couldn't rely on the
+  sampler to prove nothing half-painted reached the screen; the stroke counts did that.
 - **Edges need a sensible fallback.** Strokes shrink near edges, which left about 1% of
   pixels showing brown underpaint. Starting the still from the hidden scene stretched to
   full size means any pixel the strokes miss still shows the right color.
