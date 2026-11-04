@@ -53,7 +53,8 @@ export const MODES: readonly ModeInfo[] = [
  *   sun          0–1, sun strength
  *   sunX, sunY   sun position as a fraction of the scene's width and height
  *   stars        0–1, star brightness
- *   rimLight     0–1, green aurora light along the building edges
+ *   rimLight     0–1, aurora light on the buildings (edges, rooflines,
+ *                upper walls) and on the water around the gondola
  *
  * The key lists come first and the Palette type is built from them, so the
  * blend in `lerpPalette` covers every key, and TypeScript rejects a palette
@@ -104,8 +105,10 @@ export const PALETTES: Readonly<Record<ModeId, ReadonlyPalette>> = {
     skyTop: [4, 7, 26],
     skyHorizon: [30, 40, 100],
     distant: [10, 14, 42],
-    wall: [30, 27, 58],
-    wall2: [36, 31, 66],
+    // A step lighter than the darkest sky, so the buildings don't dissolve
+    // into it; drawBuildings adds aurora light along their tops.
+    wall: [40, 34, 74],
+    wall2: [46, 39, 82],
     windowDark: [20, 24, 54],
     windowLit: [246, 196, 118],
     waterTint: [3, 6, 22],
