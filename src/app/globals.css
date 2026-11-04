@@ -77,6 +77,10 @@
     /* Tells the browser the page is dark, so scrollbars and form controls
        are drawn dark too. */
     color-scheme: dark;
+
+    /* The site header is a fixed height, so the hero can fill exactly the
+       rest of the first screen. */
+    --header-h: 3.5rem;
   }
 
   body {

@@ -103,6 +103,9 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
    * are in normal flow, they can never overlap: on a short screen, like a
    * phone in landscape, the hero grows taller instead.
    *
+   * The column fills the screen below the site header (--header-h, in
+   * globals.css), so the hero still ends at the bottom of the first screen.
+   *
    * The controls and text need `relative` to paint above the absolutely
    * positioned canvases. `data-mode` and `data-paused` let the text scrim
    * change with the mode and motion setting (see below).
@@ -114,7 +117,7 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
       data-mode={mode}
       data-paused={paused ? "" : undefined}
       onClick={handleHeroClick}
-      className="group/hero relative flex min-h-[min(100svh,1100px)] flex-col justify-between gap-8 overflow-hidden bg-deep px-[clamp(16px,4vw,48px)] pt-[clamp(16px,3vh,28px)] pb-[clamp(36px,8vh,80px)] text-starlight"
+      className="group/hero relative flex min-h-[min(calc(100svh_-_var(--header-h)),1100px)] flex-col justify-between gap-8 overflow-hidden bg-deep px-[clamp(16px,4vw,48px)] pt-[clamp(16px,3vh,28px)] pb-[clamp(36px,8vh,80px)] text-starlight"
     >
       <canvas ref={paintRef} role="img" aria-label={description} className="absolute inset-0 block size-full" />
       <canvas
@@ -206,15 +209,17 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
           edges. It stays fully dark out to 55% of the way to the edge, which
           covers all of the text, then fades out over the rest, so there's no
           visible edge. It belongs to the text block, so it follows the text
-          on any screen size. It is strongest in Day, where the painting is
-          brightest, and fades between modes over about the time the painting
-          takes to blend. While paused, the painting changes mode all at
-          once, so the scrim does too. ADR-007 has the measurements behind
-          these values.
+          on any screen size. It is 60% in Night and Golden hour, and
+          strongest (80%) in Day, where the painting is brightest. Night was
+          50% until the site header (#7) made the hero shorter, which moved
+          the text closer to the bright aurora on narrow phones. It fades
+          between modes over about the time the painting takes to blend.
+          While paused, the painting changes mode all at once, so the scrim
+          does too. ADR-007 has the measurements behind these values.
         */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute -inset-x-[40%] -inset-y-36 -z-10 bg-[radial-gradient(closest-side,var(--color-deep)_55%,rgb(5_8_26/0.5)_78%,transparent)] opacity-50 transition-opacity duration-1000 group-data-[mode=day]/hero:opacity-80 group-data-[mode=golden]/hero:opacity-60 group-data-paused/hero:transition-none motion-reduce:transition-none"
+          className="pointer-events-none absolute -inset-x-[40%] -inset-y-36 -z-10 bg-[radial-gradient(closest-side,var(--color-deep)_55%,rgb(5_8_26/0.5)_78%,transparent)] opacity-60 transition-opacity duration-1000 group-data-[mode=day]/hero:opacity-80 group-data-paused/hero:transition-none motion-reduce:transition-none"
         />
         {children}
       </div>
