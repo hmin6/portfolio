@@ -18,6 +18,9 @@
  *   --perf           also run the 4x CPU-throttled phone check
  *   --still          also run the still-frame checks (#6): with reduced motion
  *                    or Pause motion, the painting never fills in or moves
+ *   --page           also run the shared-layout checks (#7): landmarks, the
+ *                    nav (inline or Menu), skip link, full-page Tab order,
+ *                    string dividers, and the hero's fade into the page
  *
  * Output goes to hero-measurements/ (git-ignored): one screenshot per viewport
  * and mode, rotation frames, and <label>-report.json. A summary is printed at
@@ -58,6 +61,7 @@ const { values: args } = parseArgs({
     rotation: { type: "boolean", default: false },
     perf: { type: "boolean", default: false },
     still: { type: "boolean", default: false },
+    page: { type: "boolean", default: false },
   },
 });
 
@@ -407,10 +411,17 @@ const LAYOUT = String.raw`(() => {
     .filter((c) => c.w < 44 || c.h < 44)
     .map((c) => c.name + " " + Math.round(c.w) + "x" + Math.round(c.h));
   const hero = rect(document.querySelector("section"));
+  // Every visible link and button on the page (header, hero, footer). The
+  // skip link is left out while it's hidden (1x1 until focused).
+  const pageSmall = [...document.querySelectorAll("a, button")]
+    .filter((el) => el.checkVisibility({ visibilityProperty: true }) && rect(el).width > 1)
+    .map((el) => ({ name: el.textContent.trim(), w: rect(el).width, h: rect(el).height }))
+    .filter((c) => c.w < 44 || c.h < 44)
+    .map((c) => c.name + " " + Math.round(c.w) + "x" + Math.round(c.h));
   return {
     horizontalScroll: document.documentElement.scrollWidth > innerWidth,
     gapControlsToHeading: Math.round(h1.top - controlsBottom),
-    targetsUnder44: small,
+    targetsUnder44: [...new Set([...small, ...pageSmall])],
     headingFitsFirstScreen: h1.bottom <= innerHeight,
     linkFitsFirstScreen: link.bottom <= innerHeight,
     heroHeight: Math.round(hero.height),
@@ -479,6 +490,26 @@ const SNAP = String.raw`(() => {
   }
   return h >>> 0;
 })()`;
+
+/** Where two screenshots differ: changed pixels, the largest channel difference, and the bounding box in CSS pixels. */
+const SHOT_DIFF = String.raw`async (a, b, dpr) => {
+  const load = async (s) => { const img = new Image(); img.src = "data:image/png;base64," + s; await img.decode(); return img; };
+  const [A, B] = await Promise.all([load(a), load(b)]);
+  const c = document.createElement("canvas");
+  c.width = A.width; c.height = A.height;
+  const x = c.getContext("2d");
+  x.drawImage(A, 0, 0); const da = x.getImageData(0, 0, c.width, c.height).data;
+  x.drawImage(B, 0, 0); const db = x.getImageData(0, 0, c.width, c.height).data;
+  let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1, n = 0, maxDiff = 0;
+  for (let i = 0; i < da.length; i += 4) {
+    const d = Math.max(Math.abs(da[i] - db[i]), Math.abs(da[i + 1] - db[i + 1]), Math.abs(da[i + 2] - db[i + 2]));
+    if (!d) continue;
+    const p = i / 4, px = p % c.width, py = (p / c.width) | 0;
+    n++; maxDiff = Math.max(maxDiff, d);
+    x0 = Math.min(x0, px); x1 = Math.max(x1, px); y0 = Math.min(y0, py); y1 = Math.max(y1, py);
+  }
+  return { changed: n, maxDiff, box: n ? [x0, y0, x1, y1].map((v) => Math.round(v / dpr)) : null };
+}`;
 
 /** Saves the paint canvas's pixels, so DIFF_BOX can compare against them later. */
 const SAVE_PAINT = String.raw`(() => {
@@ -612,6 +643,13 @@ async function measureModes(cdp, vp) {
   return result;
 }
 
+/** Presses Enter or Escape. Enter carries `text`, which is what activates a focused link or button. */
+async function pressKey(cdp, key) {
+  const keys = { Enter: { code: "Enter", windowsVirtualKeyCode: 13, text: "\r" }, Escape: { code: "Escape", windowsVirtualKeyCode: 27 } };
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key, ...keys[key] });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key, ...keys[key], text: undefined });
+}
+
 async function pressTab(cdp) {
   const key = { key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 };
   await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", ...key });
@@ -629,12 +667,19 @@ async function measureRings(cdp, vp) {
   // Focus the body so Tab starts from the top of the page.
   await cdp.evaluate(`(() => { document.body.tabIndex = -1; document.body.focus(); document.body.removeAttribute("tabindex"); })()`);
   const rings = {};
-  for (let i = 0; i < 10; i++) {
+  // The skip link and the header come first in the Tab order, so Tab past
+  // them until focus reaches the hero, then measure until it leaves.
+  let reached = false;
+  for (let i = 0; i < 20; i++) {
     await pressTab(cdp);
     const name = await cdp.evaluate(
       `(() => { const el = document.activeElement; return el?.closest("section") && el.matches("button, a") ? el.textContent.trim() : null; })()`,
     );
-    if (!name) break;
+    if (!name) {
+      if (reached) break;
+      continue;
+    }
+    reached = true;
     // Focusing can scroll the page, so the unfocused reference is taken
     // here, at the same scroll position, with only the ring hidden.
     const focused = await screenshot(cdp);
@@ -810,7 +855,21 @@ async function stillTest(cdp) {
     // how Chrome composites the light layer, by a step (see SNAP).
     const shotBefore = await screenshot(cdp);
     const framesAfter = await framesDuring(cdp, 1500);
-    const screenChangedWhileSettled = shotBefore !== (await screenshot(cdp));
+    const shotAfter = await screenshot(cdp);
+    // If the screen changed, record where (CSS pixels) and keep both shots.
+    const screenChange =
+      shotBefore !== shotAfter
+        ? await cdp.evaluate(`(${SHOT_DIFF})(${JSON.stringify(shotBefore)}, ${JSON.stringify(shotAfter)}, ${vp.dpr})`)
+        : null;
+    // On emulated phones the overlay scrollbar fades out a moment after the
+    // page loads: a change only in the rightmost few pixels, full height.
+    // That's the browser, not the page, so it doesn't count.
+    const scrollbarOnly = vp.mobile && screenChange?.box && screenChange.box[0] >= vp.width - 6;
+    const screenChangedWhileSettled = !!screenChange && !scrollbarOnly;
+    if (screenChange) {
+      writeFileSync(join(OUT_DIR, `${args.label}-${key}-settled-a.png`), Buffer.from(shotBefore, "base64"));
+      writeFileSync(join(OUT_DIR, `${args.label}-${key}-settled-b.png`), Buffer.from(shotAfter, "base64"));
+    }
     await cdp.evaluate(SNAP);
     const snapBefore = await cdp.evaluate(SNAP);
     await sleep(500);
@@ -824,6 +883,7 @@ async function stillTest(cdp) {
       longTasks: longTasks.length,
       framesAfter,
       screenChangedWhileSettled,
+      ...(screenChange && { screenChange }),
       canvasChangedWhileSettled: snapBefore !== (await cdp.evaluate(SNAP)),
       underpaintShare: await cdp.evaluate(UNDERPAINT_SHARE),
       pausePressed: await pausePressed(cdp),
@@ -946,6 +1006,193 @@ async function stillTest(cdp) {
   return out;
 }
 
+/*
+ * Shared-layout checks (#7): header, nav, skip link, landmarks, footer,
+ * string dividers, and the hero's fade into the page.
+ */
+
+/** What's focused now: its name, tag, landmark, and whether a focus ring shows. */
+const FOCUSED = String.raw`(() => {
+  const el = document.activeElement;
+  if (!el || el === document.body) return null;
+  const s = getComputedStyle(el);
+  const r = el.getBoundingClientRect();
+  return {
+    name: (el.getAttribute("aria-label") || el.textContent || el.id).trim().replace(/\s+/g, " ").slice(0, 40),
+    tag: el.tagName.toLowerCase(),
+    landmark: el.closest("header, nav, main, footer")?.tagName.toLowerCase() ?? "none",
+    ring: s.outlineStyle !== "none" && parseFloat(s.outlineWidth) > 0,
+    onScreen: r.width > 1 && r.bottom > 0 && r.top < innerHeight,
+  };
+})()`;
+
+/** The nav's state: inline links or the Menu fallback, and whether the inline links share one line. */
+const NAV_STATE = String.raw`(() => {
+  const nav = document.querySelector("nav[aria-label=Main]");
+  const button = nav.querySelector("button[aria-controls]");
+  const inline = [...nav.querySelectorAll("ul:not(#site-menu) a")];
+  const visible = inline.filter((a) => a.checkVisibility({ visibilityProperty: true }));
+  const tops = new Set(visible.map((a) => Math.round(a.getBoundingClientRect().top)));
+  const panel = document.getElementById("site-menu");
+  return {
+    menuButton: !!button,
+    expanded: button?.getAttribute("aria-expanded") ?? null,
+    panelVisible: !!panel && panel.checkVisibility(),
+    inlineVisible: visible.length,
+    inlineTotal: inline.length,
+    oneLine: tops.size <= 1,
+    headerHeight: Math.round(document.querySelector("header").getBoundingClientRect().height),
+    brandCurrent: document.querySelector("header a[href='/']")?.getAttribute("aria-current") ?? null,
+  };
+})()`;
+
+/** Landmark counts. */
+const LANDMARKS = String.raw`(() => ({
+  header: document.querySelectorAll("body > header").length,
+  nav: document.querySelectorAll("nav[aria-label]").length,
+  main: document.querySelectorAll("main").length,
+  footer: document.querySelectorAll("body > footer").length,
+  contactTarget: !!document.getElementById("contact"),
+}))()`;
+
+/** Mean color of the last pixel row of the hero and the first row below it, from a screenshot. */
+const SEAM = String.raw`async (shot, dpr) => {
+  const img = new Image();
+  img.src = "data:image/png;base64," + shot;
+  await img.decode();
+  const c = document.createElement("canvas");
+  c.width = img.width; c.height = img.height;
+  const x = c.getContext("2d");
+  x.drawImage(img, 0, 0);
+  const bottom = Math.round(document.querySelector("section").getBoundingClientRect().bottom * dpr);
+  const row = (y) => {
+    const d = x.getImageData(0, Math.max(0, Math.min(c.height - 1, y)), c.width, 1).data;
+    const m = [0, 0, 0];
+    for (let i = 0; i < d.length; i += 4) { m[0] += d[i]; m[1] += d[i + 1]; m[2] += d[i + 2]; }
+    return m.map((v) => Math.round(v / (d.length / 4)));
+  };
+  const above = row(bottom - 2), below = row(bottom + 1);
+  return { heroLastRow: above, pageBelow: below, maxChannelDiff: Math.max(...above.map((v, i) => Math.abs(v - below[i]))) };
+}`;
+
+/** Hovers the footer's string divider and returns how many animations started. */
+async function pluckDivider(cdp) {
+  const at = await cdp.evaluate(`(() => {
+    const d = document.querySelector("footer > div[aria-hidden]");
+    d.scrollIntoView({ block: "center" });
+    const r = d.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  })()`);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y - 80 });
+  await sleep(50);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y });
+  await sleep(100);
+  const running = await cdp.evaluate(`document.querySelector("footer > div[aria-hidden] path").getAnimations().length`);
+  await sleep(1200);
+  const after = await cdp.evaluate(`document.querySelector("footer > div[aria-hidden] path").getAnimations().length`);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y - 80 });
+  return { running, after };
+}
+
+async function pageTest(cdp) {
+  const out = {};
+  for (const vp of VIEWPORTS.filter((v) => ["desktop", "phone", "narrow"].includes(v.name))) {
+    process.stdout.write(`  ${vp.name}\n`);
+    const r = (out[vp.name] = {});
+    await setReducedMotion(cdp, false);
+    await setViewport(cdp, vp);
+    await load(cdp);
+    await sleep(2000);
+    r.landmarks = await cdp.evaluate(LANDMARKS);
+    r.nav = await cdp.evaluate(NAV_STATE);
+    r.layout = await cdp.evaluate(LAYOUT);
+
+    // Screenshots: the first screen and the bottom of the page, in each mode.
+    if (vp.name !== "narrow") {
+      for (const mode of MODES) {
+        await clickButton(cdp, mode.label);
+        await sleep(mode.slug === "night" ? 500 : 5000);
+        await cdp.evaluate(`window.scrollTo(0, 0)`);
+        await sleep(200);
+        await screenshot(cdp, `${args.label}-page-${vp.name}-${mode.slug}-top.png`);
+        await cdp.evaluate(`window.scrollTo(0, document.documentElement.scrollHeight)`);
+        await sleep(300);
+        const shot = await screenshot(cdp, `${args.label}-page-${vp.name}-${mode.slug}-bottom.png`);
+        r[`seam-${mode.slug}`] = await cdp.evaluate(`(${SEAM})(${JSON.stringify(shot)}, ${vp.dpr})`);
+      }
+      await clickButton(cdp, "Night");
+      await cdp.evaluate(`window.scrollTo(0, 0)`);
+      await sleep(1500);
+    }
+
+    // Tab through the whole page from the top, with a screenshot of each stop.
+    await cdp.evaluate(`(() => { document.activeElement?.blur(); window.scrollTo(0, 0); })()`);
+    const order = [];
+    for (let i = 0; i < 30; i++) {
+      await pressTab(cdp);
+      await sleep(60);
+      const f = await cdp.evaluate(FOCUSED);
+      if (!f || (order.length && f.name === order[0].name && f.tag === order[0].tag)) break;
+      order.push(f);
+      if (vp.name !== "narrow") await screenshot(cdp, `${args.label}-tab-${vp.name}-${String(i + 1).padStart(2, "0")}.png`);
+    }
+    r.tabOrder = order;
+
+    // Skip link: the first stop, visible when focused, and Enter moves focus into main.
+    await cdp.evaluate(`(() => { document.activeElement?.blur(); window.scrollTo(0, 0); })()`);
+    await pressTab(cdp);
+    const skip = await cdp.evaluate(FOCUSED);
+    await pressKey(cdp, "Enter");
+    await sleep(200);
+    await pressTab(cdp);
+    const afterSkip = await cdp.evaluate(FOCUSED);
+    r.skipLink = { first: skip, nextAfterEnter: afterSkip };
+
+    // The Menu fallback, when the links don't fit.
+    if (r.nav.menuButton) {
+      const m = (r.menu = {});
+      await cdp.evaluate(`document.querySelector("nav[aria-label=Main] button").focus()`);
+      await pressKey(cdp, "Enter");
+      await sleep(150);
+      m.afterEnter = await cdp.evaluate(NAV_STATE);
+      await screenshot(cdp, `${args.label}-menu-${vp.name}-open.png`);
+      await pressTab(cdp);
+      m.tabIntoPanel = await cdp.evaluate(`document.activeElement.closest("#site-menu") ? document.activeElement.textContent.trim() : null`);
+      await pressKey(cdp, "Escape");
+      await sleep(150);
+      m.afterEscape = await cdp.evaluate(NAV_STATE);
+      m.focusAfterEscape = await cdp.evaluate(FOCUSED);
+      await cdp.evaluate(`document.querySelector("nav[aria-label=Main] button").click()`);
+      await sleep(150);
+      const opened = await cdp.evaluate(NAV_STATE);
+      const outside = { x: Math.round(vp.width / 2), y: Math.round(vp.height * 0.7), button: "left", clickCount: 1 };
+      await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...outside });
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...outside });
+      await sleep(150);
+      m.outsideClick = { before: opened.expanded, after: (await cdp.evaluate(NAV_STATE)).expanded };
+    }
+
+    // String divider: plucks with motion on; not with Pause motion or reduced
+    // motion. Hidden from the accessibility tree.
+    if (vp.name === "desktop") {
+      r.divider = { motionOn: await pluckDivider(cdp) };
+      await cdp.evaluate(`window.scrollTo(0, 0)`);
+      await clickButton(cdp, "Pause motion");
+      await sleep(300);
+      r.divider.pauseMotion = await pluckDivider(cdp);
+      await setReducedMotion(cdp, true);
+      await load(cdp);
+      r.divider.reducedMotion = await pluckDivider(cdp);
+      const { root } = await cdp.send("DOM.getDocument", { depth: 0 });
+      const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: "footer > div[aria-hidden] svg" });
+      const ax = await cdp.send("Accessibility.getPartialAXTree", { nodeId, fetchRelatives: false });
+      r.divider.inAccessibilityTree = !ax.nodes[0].ignored;
+      await setReducedMotion(cdp, false);
+    }
+  }
+  return out;
+}
+
 function summarize(report) {
   const lines = [];
   const mark = (value, bar) => (value === null || value === undefined ? "  n/a" : `${value.toFixed(2).padStart(5)}${value >= bar ? " " : "*"}`);
@@ -1002,6 +1249,19 @@ function summarize(report) {
     const parts = Object.entries(r).map(([k, v]) => `${k} ${typeof v === "object" && v !== null ? JSON.stringify(v) : v}`);
     lines.push(`still ${name}: ${parts.join(", ")}`);
   }
+  for (const [vp, r] of Object.entries(report.page ?? {})) {
+    const order = r.tabOrder.map((f) => `${f.name}${f.ring ? "" : " (no ring!)"}`).join(" > ");
+    lines.push(`page ${vp}: landmarks ${JSON.stringify(r.landmarks)}`);
+    lines.push(`page ${vp}: nav ${JSON.stringify(r.nav)}, small targets [${r.layout.targetsUnder44.join(", ")}], heading/link on first screen ${r.layout.headingFitsFirstScreen}/${r.layout.linkFitsFirstScreen}`);
+    lines.push(`page ${vp}: Tab order (${r.tabOrder.length}): ${order}`);
+    lines.push(`page ${vp}: skip link first "${r.skipLink.first?.name}" (on screen ${r.skipLink.first?.onScreen}), next Tab after Enter "${r.skipLink.nextAfterEnter?.name}"`);
+    for (const mode of MODES) {
+      const seam = r[`seam-${mode.slug}`];
+      if (seam) lines.push(`page ${vp}: hero bottom ${mode.slug} last row ${seam.heroLastRow} vs page ${seam.pageBelow} (max diff ${seam.maxChannelDiff})`);
+    }
+    if (r.menu) lines.push(`page ${vp}: menu ${JSON.stringify(r.menu)}`);
+    if (r.divider) lines.push(`page ${vp}: divider ${JSON.stringify(r.divider)}`);
+  }
   lines.push(failures ? `${failures} check(s) below the bar.` : "All contrast and layout checks pass.");
   return lines.join("\n");
 }
@@ -1034,6 +1294,10 @@ try {
   if (args.still) {
     process.stdout.write("still frames...\n");
     report.still = await stillTest(cdp);
+  }
+  if (args.page) {
+    process.stdout.write("page layout...\n");
+    report.page = await pageTest(cdp);
   }
 } finally {
   cdp.close();
