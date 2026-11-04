@@ -1,4 +1,4 @@
-import type { Viewport } from "./layout";
+import type { Rect, Viewport } from "./layout";
 
 /** A floating lantern. Position in scene pixels, speed in scene pixels per second. */
 export interface Lantern {
@@ -27,15 +27,47 @@ export function seedLanterns(view: Viewport): Lantern[] {
   return lanterns;
 }
 
-/** Adds a lantern at (x, y) in scene pixels. Changes the array in place. */
-export function addLantern(lanterns: Lantern[], view: Viewport, x: number, y: number): void {
-  if (lanterns.length >= MAX_LANTERNS) lanterns.shift();
+/** Side length of a lantern in scene pixels. */
+export function lanternSize(view: Viewport): number {
+  return Math.max(2.2, view.sceneW * 0.008);
+}
+
+/** How far a lantern bobs up and down, in scene pixels. */
+export const LANTERN_BOB = 1.2;
+
+/**
+ * The scene-pixel box a lantern can paint into: the lantern at the top of
+ * its bob down to the end of its reflection streaks (see drawLanterns in
+ * scene.ts), plus a small margin. Used to repaint just this area while
+ * motion is paused.
+ */
+export function lanternBounds(lantern: Lantern, view: Viewport): Rect {
+  const size = lanternSize(view);
+  const top = lantern.y - size - LANTERN_BOB - 2;
+  // Five streaks, 2 px apart, starting 2 px below the lantern, each 1 px tall.
+  const bottom = lantern.y + LANTERN_BOB + 2 + 4 * 2 + 1 + 2;
+  return { x: lantern.x - size - 2, y: top, width: size * 2 + 4, height: bottom - top };
+}
+
+/**
+ * Adds a lantern at (x, y) in scene pixels. Changes the array in place.
+ * Returns the oldest lantern if it had to be dropped to make room, so the
+ * caller can repaint the spot it left.
+ */
+export function addLantern(
+  lanterns: Lantern[],
+  view: Viewport,
+  x: number,
+  y: number,
+): Lantern | undefined {
+  const dropped = lanterns.length >= MAX_LANTERNS ? lanterns.shift() : undefined;
   lanterns.push({
     x,
     y,
     vx: view.sceneW * (0.004 + Math.random() * 0.005),
     seed: Math.random() * 10,
   });
+  return dropped;
 }
 
 /**

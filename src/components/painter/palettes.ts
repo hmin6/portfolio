@@ -197,6 +197,31 @@ export function lerpPalette(
   }
 }
 
+/**
+ * True once `current` has finished blending toward `target`: every color
+ * channel within 2 of its target (on the 0–255 scale), and every amount
+ * within 2/255. Scaling amounts to the same range lets one threshold work
+ * for both.
+ */
+export function isPaletteSettled(current: Palette, target: ReadonlyPalette): boolean {
+  const limit = 2;
+  for (const key of COLOR_KEYS) {
+    const c = current[key];
+    const t = target[key];
+    if (
+      Math.abs(c[0] - t[0]) > limit ||
+      Math.abs(c[1] - t[1]) > limit ||
+      Math.abs(c[2] - t[2]) > limit
+    ) {
+      return false;
+    }
+  }
+  for (const key of AMOUNT_KEYS) {
+    if (Math.abs(current[key] - target[key]) * 255 > limit) return false;
+  }
+  return true;
+}
+
 /*
  * Fixed scene colors that don't change with the mode and aren't UI tokens.
  */

@@ -9,7 +9,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
-import { createPainter, REDUCED_MOTION_QUERY, type Painter } from "./engine";
+import { createPainter, REDUCED_MOTION_QUERY, resolvePaused, type Painter } from "./engine";
 import { MODES, type ModeId } from "./palettes";
 
 /*
@@ -67,7 +67,8 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
     getReducedMotion,
     getServerReducedMotion,
   );
-  const paused = userPaused ?? prefersReducedMotion;
+  // Same rule the engine uses, so the button always matches the painting.
+  const paused = resolvePaused(userPaused, prefersReducedMotion);
 
   // An Effect Event reads the latest mode and pause choice when the effect
   // below runs, without making them dependencies. Otherwise the engine

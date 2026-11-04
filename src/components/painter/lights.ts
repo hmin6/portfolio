@@ -1,5 +1,5 @@
 import { rgba } from "./color";
-import type { Lantern } from "./lanterns";
+import { LANTERN_BOB, type Lantern } from "./lanterns";
 import type { SceneLayout, Viewport } from "./layout";
 import type { Palette, ThemeColors } from "./palettes";
 import type { Sprites } from "./sprites";
@@ -82,28 +82,48 @@ export function drawLights(input: LightsInput): void {
   for (const lantern of lanterns) {
     const R = Math.max(14 * dpr, SW * 0.03 * kx);
     const flicker = 0.8 + 0.2 * Math.sin(t * 3.3 + lantern.seed);
-    const y = lantern.y + Math.sin(t * 1.1 + lantern.seed) * 1.2;
+    const y = lantern.y + Math.sin(t * 1.1 + lantern.seed) * LANTERN_BOB;
     c.globalAlpha = 0.7 * lampAmount * flicker;
     c.drawImage(sprites.glowWarm, lantern.x * kx - R, (y - 1) * ky - R, R * 2, R * 2);
     c.globalAlpha = 0.3 * lampAmount * flicker;
     c.drawImage(sprites.glowWarm, lantern.x * kx - R * 0.4, (y + 4) * ky - R, R * 0.8, R * 2.4);
   }
 
-  // Sun glints: random sparkles in a column under the sun, the "path" of
-  // sunlight on water. `d` is depth below the horizon; the column widens
-  // toward the viewer.
+  // Sun glints: sparkles in a column under the sun, the "path" of sunlight
+  // on water. `d` is depth below the horizon; the column widens toward the
+  // viewer. The values look random but come from hash01, so the same time
+  // step always gives the same glints. While animating, the step changes
+  // 30 times a second and they sparkle. While paused, t is frozen, so
+  // redrawing this layer (to add a lantern) leaves the glints unchanged.
   if (p.sun > 0.05) {
     const cx = p.sunX * W;
+    const step = Math.floor(t * 30);
     for (let i = 0; i < 34; i++) {
-      const d = Math.random();
+      const d = hash01(i * 4, step);
       const y = hy * ky + d * (H - hy * ky);
-      const x = cx + (Math.random() - 0.5) * W * 0.1 * (1 + d * 2.5);
-      const R = (2 + Math.random() * 4) * dpr;
-      c.globalAlpha = p.sun * 0.55 * Math.random();
+      const x = cx + (hash01(i * 4 + 1, step) - 0.5) * W * 0.1 * (1 + d * 2.5);
+      const R = (2 + hash01(i * 4 + 2, step) * 4) * dpr;
+      c.globalAlpha = p.sun * 0.55 * hash01(i * 4 + 3, step);
       c.drawImage(sprites.glowWhite, x - R, y - R, R * 2, R * 2);
     }
   }
 
   c.globalAlpha = 1;
   c.globalCompositeOperation = "source-over";
+}
+
+/**
+ * A repeatable pseudo-random number in [0, 1): the same (a, b) always gives
+ * the same result. Math.imul multiplies as 32-bit integers, and the shifts
+ * and XORs mix the bits so that nearby inputs give unrelated outputs. `>>> 0`
+ * reads the result as unsigned, and dividing by 2^32 maps it to [0, 1).
+ */
+function hash01(a: number, b: number): number {
+  let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x632be59b, 0xc2b2ae35);
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x7feb352d);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x846ca68b);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
 }

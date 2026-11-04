@@ -1,5 +1,5 @@
 import { mix, rgba } from "./color";
-import type { Lantern } from "./lanterns";
+import { LANTERN_BOB, lanternSize, type Lantern } from "./lanterns";
 import type { AuroraBand, SceneLayout, Viewport } from "./layout";
 import { WARM_GLOW, type Palette, type ThemeColors } from "./palettes";
 import type { Sprites } from "./sprites";
@@ -447,9 +447,9 @@ function drawGondola({ ctx: s, view, layout, palette: p, t }: SceneInput): void 
 }
 
 function drawLanterns({ ctx: s, view, palette: p, lanterns, t }: SceneInput): void {
-  const size = Math.max(2.2, view.sceneW * 0.008);
+  const size = lanternSize(view);
   for (const lantern of lanterns) {
-    const y = lantern.y + Math.sin(t * 1.1 + lantern.seed) * 1.2;
+    const y = lantern.y + Math.sin(t * 1.1 + lantern.seed) * LANTERN_BOB;
     s.fillStyle = rgba(mix(WARM_GLOW, p.windowLit, 0.4));
     s.fillRect(lantern.x - size / 2, y - size, size, size);
     // Wobbly reflection streaks below the lantern.

@@ -1,5 +1,12 @@
 import { clamp255 } from "./color";
-import { Region, regionAt, type AuroraBand, type SceneLayout, type Viewport } from "./layout";
+import {
+  Region,
+  regionAt,
+  type AuroraBand,
+  type Rect,
+  type SceneLayout,
+  type Viewport,
+} from "./layout";
 
 export interface StrokeInput {
   /** Context of the visible paint canvas. */
@@ -11,6 +18,11 @@ export interface StrokeInput {
   pixels: Uint8ClampedArray;
   /** Animation time in seconds. */
   t: number;
+  /**
+   * Where strokes may land, in device pixels. Defaults to the whole canvas.
+   * A small area repaints one spot, like a lantern added while paused.
+   */
+  area?: Rect;
 }
 
 /**
@@ -31,6 +43,7 @@ export interface StrokeInput {
 export function paintStrokes(input: StrokeInput, count: number, sizeMul: number): void {
   const { ctx, view, layout, band, pixels: data, t } = input;
   const { width: W, height: H, sceneW: SW, sceneH: SH } = view;
+  const area = input.area ?? { x: 0, y: 0, width: W, height: H };
   // Device pixels per scene pixel.
   const kx = W / SW;
   const ky = H / SH;
@@ -39,10 +52,11 @@ export function paintStrokes(input: StrokeInput, count: number, sizeMul: number)
   const base = view.dpr * (view.narrow ? 0.55 : 1);
 
   for (let i = 0; i < count; i++) {
-    const px = Math.random() * W;
-    const py = Math.random() * H;
-    const sx = Math.min(SW - 1, (px / kx) | 0);
-    const sy = Math.min(SH - 1, (py / ky) | 0);
+    const px = area.x + Math.random() * area.width;
+    const py = area.y + Math.random() * area.height;
+    // Clamp both ways: a small area near an edge can reach just past it.
+    const sx = Math.max(0, Math.min(SW - 1, (px / kx) | 0));
+    const sy = Math.max(0, Math.min(SH - 1, (py / ky) | 0));
 
     // The pixel array is RGBA, 4 bytes per pixel, row after row.
     const idx = (sy * SW + sx) * 4;

@@ -56,6 +56,14 @@ export function createViewport(
   };
 }
 
+/** An axis-aligned box. Which pixels (scene or device) depends on the caller. */
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface Building {
   x0: number;
   x1: number;
