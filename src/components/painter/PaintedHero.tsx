@@ -36,10 +36,21 @@ function getServerReducedMotion(): boolean {
  * Pill buttons over the painting. `aria-pressed:` styles apply only when
  * aria-pressed="true", so the visible state always matches what screen
  * readers announce.
+ *
+ * The pill edge has two tones for the same reason as the focus ring in
+ * globals.css: a light border shows against the dark Night sky, and a 1px
+ * dark ring (`ring-1`, a box-shadow) outside it shows against the bright
+ * Day sky. `focus-visible:shadow-focus` keeps the focus ring's dark bands,
+ * which the ring utility would otherwise replace.
+ *
+ * Against a mid-tone part of the painting, neither tone reaches 3:1 unless
+ * the two are at least 9:1 apart, so the border is 80% starlight (it blends
+ * with the dark fill behind it) and the ring is 85% deep.
  */
 const pressedStyle = "aria-pressed:bg-starlight aria-pressed:text-night";
-const chipStyle = `min-h-12 cursor-pointer rounded-full border border-starlight/20 bg-deep/55 px-[18px] text-sm font-medium text-starlight backdrop-blur-md ${pressedStyle}`;
-const segmentStyle = `min-h-10 cursor-pointer rounded-full px-3.5 text-sm font-medium text-starlight ${pressedStyle}`;
+const pillEdge = "border border-starlight/80 bg-deep/70 ring-1 ring-deep/85 backdrop-blur-md";
+const chipStyle = `min-h-12 cursor-pointer rounded-full px-3 text-sm font-medium text-starlight focus-visible:shadow-focus sm:px-[18px] ${pillEdge} ${pressedStyle}`;
+const segmentStyle = `min-h-11 min-w-11 cursor-pointer rounded-full px-3 text-sm whitespace-nowrap font-medium text-starlight sm:px-3.5 ${pressedStyle}`;
 
 interface PaintedHeroProps {
   /** id of the heading passed in `children`, which names this section. */
@@ -141,7 +152,7 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
         <div
           role="group"
           aria-label="Time of day"
-          className="flex rounded-full border border-starlight/20 bg-deep/55 p-1 backdrop-blur-md"
+          className={`flex rounded-full p-1 ${pillEdge}`}
         >
           {MODES.map((m) => (
             <button
