@@ -31,7 +31,24 @@ The prototype proved the look, but it was one long script with globals, so it co
 - **Mode buttons did nothing to the painting.** Screenshots showed Golden hour and Day still painting the night scene, even though the buttons and alt text changed. The frame clock mixed two timers: it reset `lastTime` with `performance.now()` after each frame, but `requestAnimationFrame` timestamps mark when a frame *began*, which can be earlier. `dt` was floored to 0 every frame, so time froze and the palette blend factor `1 − 0.25^0` was 0. The aurora still seemed to move only because every frame paints new random strokes. Fixed by using frame timestamps only.
 - **A design-token gap from #3.** Tailwind v4 only outputs CSS variables that some class uses, so `--color-violet` and `--color-magenta` would have been missing once the token preview page was deleted. Marking the theme block `@theme static` makes it output all of them, and the build CSS now has them.
 - **Checking "only one loop runs" needed a way to see loops.** I drove headless Edge through the DevTools protocol and wrapped `requestAnimationFrame` to count distinct callbacks per second. Each painter has its own `frame` function, so that count is the number of live loops. It stayed at exactly 1 through Strict Mode and seven Fast Refresh rebuilds.
-- **My first loop check attached to the wrong tab** (an Edge sync dialog), and a build piped into `Select-Object -First 12` was cut off early. Both were problems with the test setup, not the code, but they were confusing until I noticed.
+- **Pause didn't feel like pause.** After pressing Pause motion, the painting kept moving
+  for several seconds, and adding a lantern while paused started it moving again. The
+  engine had one "settle" mode: 110 frames of fresh strokes over the whole canvas. It ran
+  on every pause and every lantern, and it was counted in frames, so at 15–20 fps it
+  lasted 5–7 seconds. I split it by how much of the canvas is actually out of date:
+  - **Full repaint:** only when the canvas isn't fully painted (first load, resize, a mode
+    change, or a pause during the opening reveal or a mode blend).
+  - **Catch-up:** a short pass measured in time (≤ 0.25 s) when pausing a finished painting.
+  - **Local pass:** three frames of dense strokes in a small box around a new lantern.
+
+  Sun glints also used `Math.random()` on every redraw, so even a still Golden hour or Day
+  scene flickered whenever the light layer was redrawn. They now come from a hash of the
+  glint index and the time step, so a frozen clock always draws the same glints.
+
+  Testing with canvas pixel diffs confirmed it: pausing stops within about 0.27 s, and a
+  lantern changes only an ~85×80 px box. Once paused and settled, 0 loops run, with
+  reduced motion both on and off.
+- **My first loop check attached to the wrong tab** (an Edge sync dialog), and a build piped into `Select-Object -First 12` was cut off early. Both were problems with the test setup, not the code, but they were confusing until I noticed. Similarly, the first `getImageData` read of the semi-transparent light canvas came back with slightly different rounding than later reads. That looked like a change while paused until I compared back-to-back reads.
 
 ## What I learned
 - **Keep fast loops out of React state.** The painter redraws about 60 times a second.
