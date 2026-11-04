@@ -141,6 +141,9 @@ export function createLayout(view: Viewport): SceneLayout {
   const { sceneW: SW, sceneH: SH, horizon: hy } = view;
   // Wide screens get narrower buildings so the canal stays open in the middle.
   const wide = SW / SH > 1.3;
+  // Tall (portrait phone) screens: the text covers the lower third of the
+  // hero, so the gondola moves up toward the horizon to stay in view.
+  const tall = SW / SH < 0.8;
   const leftW = SW * (wide ? 0.2 : 0.26);
   const rightW = SW * (wide ? 0.17 : 0.22);
 
@@ -214,7 +217,7 @@ export function createLayout(view: Viewport): SceneLayout {
     windows,
     gondola: {
       x: SW * (wide ? 0.58 : 0.52),
-      y: SH * 0.75,
+      y: SH * (tall ? 0.6 : 0.75),
       length: SW * (wide ? 0.22 : 0.34),
       lampX: 0,
       lampY: 0,

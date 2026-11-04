@@ -261,11 +261,26 @@ function drawBuildings({ ctx: s, view, layout, palette: p, theme, t }: SceneInpu
       s.fill();
     }
 
-    // Aurora light catching the edge that faces the canal.
     if (p.rimLight > 0.01) {
+      // Aurora light from above: the upper wall is lit and the lower wall
+      // falls into shadow. The sky is darkest high up and brightest near
+      // the horizon, so this keeps the wall a different value from the sky
+      // beside it along its whole height, instead of matching it halfway.
+      const fall = s.createLinearGradient(0, b.top, 0, b.base);
+      fall.addColorStop(0, rgba(theme.teal, 0.24 * p.rimLight));
+      fall.addColorStop(0.45, rgba(theme.teal, 0));
+      fall.addColorStop(0.55, "rgba(0,0,0,0)");
+      fall.addColorStop(1, `rgba(0,0,0,${0.5 * p.rimLight})`);
+      s.fillStyle = fall;
+      s.fillRect(b.x0, b.top, bw, bh);
+
+      // Aurora light catching the roofline (and the raised roof cap) and
+      // the edge that faces the canal.
       s.fillStyle = rgba(theme.aurora, p.rimLight);
-      const edge = b.x0 === 0 ? b.x1 - 1 : b.x0;
-      s.fillRect(edge, b.top, 1, bh);
+      s.fillRect(b.x0, b.top, bw, 1);
+      s.fillRect(b.x0 + bw * 0.2, b.top - SH * 0.02, bw * 0.6, 1);
+      const edge = b.x0 === 0 ? b.x1 - 1.5 : b.x0;
+      s.fillRect(edge, b.top, 1.5, bh);
     }
 
     // Balcony ledge.
@@ -371,11 +386,23 @@ function drawPoles({ ctx: s, view, layout, palette: p, t }: SceneInput): void {
  * its length L, so it scales with the scene. It bobs up and down and rocks
  * slightly, with two slow sines at different speeds.
  */
-function drawGondola({ ctx: s, view, layout, palette: p, t }: SceneInput): void {
+function drawGondola({ ctx: s, view, layout, palette: p, theme, t }: SceneInput): void {
   const { sceneH: SH } = view;
   const G = layout.gondola;
   const L = G.length;
   const bob = Math.sin(t * 0.9) * SH * 0.004;
+
+  // At night the near-black boat sits on near-black water. A soft band of
+  // reflected aurora light on the water behind it gives the hull something
+  // to stand out against, the way a silhouette reads against a lit surface.
+  if (p.rimLight > 0.01) {
+    s.globalAlpha = 0.9 * p.rimLight;
+    s.fillStyle = rgba(theme.teal);
+    s.beginPath();
+    s.ellipse(G.x, G.y + bob - L * 0.02, L * 0.62, L * 0.09, 0, 0, Math.PI * 2);
+    s.fill();
+    s.globalAlpha = 1;
+  }
 
   s.save();
   s.translate(G.x, G.y + bob);
@@ -392,8 +419,8 @@ function drawGondola({ ctx: s, view, layout, palette: p, t }: SceneInput): void 
   s.closePath();
   s.fill();
 
-  // Gunwale highlight picks up a little sky color.
-  s.strokeStyle = rgba(mix(p.boat, p.skyHorizon, 0.65));
+  // Gunwale highlight picks up a little sky color, and aurora green at night.
+  s.strokeStyle = rgba(mix(mix(p.boat, p.skyHorizon, 0.65), theme.aurora, p.rimLight * 0.8));
   s.lineWidth = Math.max(1, L * 0.012);
   s.beginPath();
   s.moveTo(-L / 2 + L * 0.01, -L * 0.05);
