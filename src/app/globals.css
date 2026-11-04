@@ -78,9 +78,11 @@
        are drawn dark too. */
     color-scheme: dark;
 
-    /* The site header is a fixed height, so the hero can fill exactly the
-       rest of the first screen. */
+    /* Shared layout sizes. The site header is a fixed height, so the hero
+       can fill exactly the rest of the first screen. The hero's bottom
+       padding is also the height of its fade into the page (PaintedHero). */
     --header-h: 3.5rem;
+    --hero-pb: clamp(36px, 8vh, 80px);
   }
 
   body {

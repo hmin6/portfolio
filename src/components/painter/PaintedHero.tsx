@@ -117,7 +117,7 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
       data-mode={mode}
       data-paused={paused ? "" : undefined}
       onClick={handleHeroClick}
-      className="group/hero relative flex min-h-[min(calc(100svh_-_var(--header-h)),1100px)] flex-col justify-between gap-8 overflow-hidden bg-deep px-[clamp(16px,4vw,48px)] pt-[clamp(16px,3vh,28px)] pb-[clamp(36px,8vh,80px)] text-starlight"
+      className="group/hero relative flex min-h-[min(calc(100svh_-_var(--header-h)),1100px)] flex-col justify-between gap-8 overflow-hidden bg-deep px-[clamp(16px,4vw,48px)] pt-[clamp(16px,3vh,28px)] pb-(--hero-pb) text-starlight"
     >
       <canvas ref={paintRef} role="img" aria-label={description} className="absolute inset-0 block size-full" />
       <canvas
@@ -223,6 +223,21 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
         />
         {children}
       </div>
+
+      {/*
+        Bottom fade, from the painting into the page's night background, so
+        the hero doesn't end on a hard edge (most visible on a tall screen,
+        where the hero stops at 1100px). It fills the hero's bottom padding,
+        below the text, so it never covers a letter and the text contrast
+        doesn't change. It comes last so it also covers the bottom of the
+        text scrim, which would otherwise leave a patch of the darker `deep`
+        against the `night` page. pointer-events-none keeps clicks on the
+        water reaching the hero (for lanterns).
+      */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-(--hero-pb) bg-linear-to-b from-transparent to-night"
+      />
     </section>
   );
 }
