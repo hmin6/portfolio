@@ -2,6 +2,7 @@ import { rgba } from "./color";
 import {
   addLantern,
   lanternBounds,
+  rescaleLanterns,
   seedLanterns,
   updateLanterns,
   type Lantern,
@@ -152,8 +153,17 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
 
   /** Animation time in seconds. Only advances while motion is running. */
   let t = 0;
-  /** Full-canvas frames painted since the last resize. */
+  /**
+   * Full-canvas frames painted since the page loaded. Drives the opening
+   * reveal. A resize doesn't reset it, so the reveal never plays twice.
+   */
   let frames = 0;
+  /**
+   * Full-canvas frames painted since the last resize. Until this reaches
+   * REPAINT_FRAMES the canvas may still show a stretched copy of the old
+   * painting, so pausing then repaints it instead of just stopping.
+   */
+  let framesSinceResize = 0;
   // Paused work (see the comment above REPAINT_FRAMES). A blank canvas that
   // starts paused, e.g. for reduced motion, needs a full repaint.
   let repaintFrames = running ? 0 : REPAINT_FRAMES;
@@ -191,20 +201,48 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
     ctx.paint.fillRect(0, 0, view.width, view.height);
   }
 
+  /** A copy of a canvas's current pixels, or null if there's nothing to copy. */
+  function copyOf(canvas: HTMLCanvasElement): HTMLCanvasElement | null {
+    const copy = document.createElement("canvas");
+    copy.width = canvas.width;
+    copy.height = canvas.height;
+    const copyCtx = copy.getContext("2d");
+    if (!copyCtx) return null;
+    copyCtx.drawImage(canvas, 0, 0);
+    return copy;
+  }
+
   function resize(): void {
     if (destroyed) return;
     const next = measure();
     // The ResizeObserver also fires once when it starts watching. Skip that
-    // call (and any other no-op) so the painting isn't wiped for nothing.
+    // call (and any other no-op) so the painting isn't redrawn for nothing.
     if (next.width === view.width && next.height === view.height && next.dpr === view.dpr) {
       return;
     }
+    // Resizing a canvas clears it, so copy the painting aside first.
+    const old = frames > 0 ? copyOf(el.paint) : null;
+    const previous = view;
     view = next;
     layout = createLayout(view);
     budget.setMax(maxStrokes(view));
     sizeCanvases();
-    frames = 0;
-    // Resizing clears the canvas, so a paused hero needs a full repaint.
+    if (old) {
+      // Stretch the old painting to the new size rather than cropping it.
+      // Everything in the scene is placed as a fraction of its width and
+      // height (the horizon at 53%, the buildings at the sides), so after
+      // stretching, the old painting's horizon and buildings land where the
+      // new scene has them. Normal strokes then repaint the stretched
+      // brushwork. It also matches what the visitor already sees: while the
+      // resize is debounced, the browser stretches the old canvas to the
+      // new size anyway.
+      ctx.paint.imageSmoothingQuality = "high";
+      ctx.paint.drawImage(old, 0, 0, view.width, view.height);
+    }
+    rescaleLanterns(lanterns, previous, view);
+    framesSinceResize = 0;
+    // A paused hero repaints the stretched copy once (at normal stroke
+    // size, since `frames` isn't reset), then holds still.
     startRepaint();
     if (lanterns.length === 0) lanterns = seedLanterns(view);
     wake();
@@ -300,6 +338,7 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
     budget.record(performance.now() - start);
     drawLights({ ctx: ctx.lights, view, layout, palette, sprites, theme, lanterns, t });
     frames++;
+    framesSinceResize++;
   }
 
   /**
@@ -348,13 +387,13 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
     if (running) {
       repaintFrames = 0;
       catchUpMs = 0;
-    } else if (frames >= REPAINT_FRAMES && isPaletteSettled(palette, target)) {
+    } else if (framesSinceResize >= REPAINT_FRAMES && isPaletteSettled(palette, target)) {
       // The canvas is fully painted: let the last strokes land, then stop.
       repaintFrames = 0;
       catchUpMs = CATCH_UP_MS;
     } else {
-      // Paused during the opening reveal or partway through a mode blend:
-      // finish painting the canvas first.
+      // Paused during the opening reveal, partway through a mode blend, or
+      // soon after a resize: finish painting the canvas first.
       startRepaint();
     }
     wake();
@@ -390,8 +429,9 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
   }
 
   const resizeObserver = new ResizeObserver(() => {
-    // Debounced: a window drag fires many resizes, and each one wipes the
-    // painting, so wait until the size has stopped changing.
+    // Debounced: a window drag fires many resizes, and each one stretches
+    // the painting (blurring it a little more each time), so wait until the
+    // size has stopped changing.
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(resize, RESIZE_DEBOUNCE_MS);
   });

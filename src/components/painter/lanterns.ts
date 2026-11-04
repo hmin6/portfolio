@@ -71,6 +71,24 @@ export function addLantern(
 }
 
 /**
+ * Moves lanterns to the same relative spot in a resized scene. Positions are
+ * in scene pixels, and the scene's size changes with the hero's (a phone
+ * rotating can change it from 220×476 to 360×166), so without this a
+ * lantern could end up in the sky or off the edge. The horizon is a fixed
+ * fraction of the height, so a lantern on the water stays on the water.
+ * Changes the lanterns in place.
+ */
+export function rescaleLanterns(lanterns: Lantern[], from: Viewport, to: Viewport): void {
+  const kx = to.sceneW / from.sceneW;
+  const ky = to.sceneH / from.sceneH;
+  for (const lantern of lanterns) {
+    lantern.x *= kx;
+    lantern.y *= ky;
+    lantern.vx *= kx;
+  }
+}
+
+/**
  * Drifts lanterns to the right, drops any that have floated off the edge,
  * and now and then launches a new one from the left.
  */
