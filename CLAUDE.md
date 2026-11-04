@@ -46,6 +46,7 @@ Never present unbuilt features as finished. Hackathon projects are not shown on 
 - Commit messages follow Conventional Commits (feat:, fix:, docs:, chore:, refactor:).
 - Open PRs with `gh pr create`, fill in the template, and include "Closes #<number>".
 - Never push directly to main.
+- Don't add "Generated with Claude Code" to PR descriptions or Co-Authored-By lines to commits.
 
 ## Working rules
 - Small, focused changes; explain non-obvious code so I can learn from it
