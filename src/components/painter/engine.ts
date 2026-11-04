@@ -101,9 +101,17 @@ interface LocalPass {
   framesLeft: number;
 }
 
-/** Stroke budget ceiling: lower on narrow (usually slower, smaller) screens. */
+/**
+ * Stroke budget ceiling, in proportion to the screen's area: 1800 strokes
+ * per frame for a 1440×900 desktop, down to 900 on a phone. Before, it
+ * switched on the narrow breakpoint, so a phone in landscape (wider than
+ * 700px) got the full desktop ceiling. Slow devices go lower still: the
+ * budget backs off whenever painting a frame takes too long (StrokeBudget).
+ */
 function maxStrokes(view: Viewport): number {
-  return view.narrow ? 900 : 1800;
+  const cssArea = (view.width * view.height) / (view.dpr * view.dpr);
+  const share = cssArea / (1440 * 900);
+  return Math.round(Math.min(1800, Math.max(900, 1800 * share)));
 }
 
 /**

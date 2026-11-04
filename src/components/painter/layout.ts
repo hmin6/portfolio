@@ -21,8 +21,8 @@ export interface Viewport {
   sceneH: number;
   /** Row of the horizon (where sky meets water), in scene pixels. */
   horizon: number;
-  /** Narrow screens use a smaller scene and smaller strokes. */
-  narrow: boolean;
+  /** Stroke size multiplier, 0.45–1. See STROKE_REFERENCE. */
+  strokeScale: number;
 }
 
 /**
@@ -31,7 +31,20 @@ export interface Viewport {
  * keeping the per-frame cost reasonable.
  */
 const MAX_DPR = 1.5;
+/** Below this CSS width the scene is 220 scene pixels wide instead of 360. */
 const NARROW_BREAKPOINT = 700;
+
+/**
+ * Stroke sizes in strokes.ts were tuned on a 1440px-wide desktop, where one
+ * scene pixel covers 1440 / 360 = 4 CSS pixels. Strokes scale with how many
+ * CSS pixels a scene pixel covers on this screen, so they keep the same size
+ * relative to the scene's detail at any width. Before, they jumped at the
+ * narrow breakpoint: a 700px-wide screen (or a phone in landscape) got
+ * full desktop strokes on a scene pixel only 2 CSS pixels wide, which
+ * smeared windows and rooftops.
+ */
+const STROKE_REFERENCE = 4;
+const MIN_STROKE_SCALE = 0.45;
 
 export function createViewport(
   cssWidth: number,
@@ -52,7 +65,7 @@ export function createViewport(
     sceneW,
     sceneH,
     horizon: Math.round(sceneH * 0.53),
-    narrow,
+    strokeScale: Math.min(1, Math.max(MIN_STROKE_SCALE, w / sceneW / STROKE_REFERENCE)),
   };
 }
 
