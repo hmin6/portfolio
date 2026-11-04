@@ -104,7 +104,8 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
   let tabVisible = document.visibilityState === "visible";
   /** Pending requestAnimationFrame id, or 0 if none is scheduled. */
   let rafId = 0;
-  let lastTime = 0;
+  /** Timestamp of the previous frame, or null right after waking from idle. */
+  let lastTime: number | null = null;
   let resizeTimer: ReturnType<typeof setTimeout> | undefined;
   let destroyed = false;
 
@@ -165,20 +166,24 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
     return canDraw() && settle < SETTLE_FRAMES;
   }
 
+  /** Restarts the loop if it is idle and there is something to draw. */
   function wake(): void {
     if (destroyed || rafId !== 0) return;
     if (!isAnimating() && !isSettling()) return;
-    lastTime = performance.now();
+    // The time spent idle shouldn't count as animation time.
+    lastTime = null;
     rafId = requestAnimationFrame(frame);
   }
 
   function frame(now: number): void {
     rafId = 0;
     if (destroyed) return;
-    // Seconds since the last frame. Capped at 50 ms so a slow frame or a
-    // pause doesn't make everything jump forward; floored at 0 because the
-    // first timestamp can be a hair earlier than the one wake() recorded.
-    const dt = Math.min(0.05, Math.max(0, (now - lastTime) / 1000));
+    // Seconds since the previous frame, from requestAnimationFrame's own
+    // timestamps only. (Mixing in performance.now() breaks this: a frame's
+    // timestamp is when the frame *began*, which can be earlier than the
+    // end of the previous frame's work, so dt would come out at or below 0.)
+    // Capped at 50 ms so one slow frame doesn't make everything jump.
+    const dt = lastTime === null ? 0 : Math.min(0.05, (now - lastTime) / 1000);
     lastTime = now;
 
     const animate = isAnimating();
@@ -214,7 +219,8 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
 
     frames++;
     if (!animate) settle++;
-    wake();
+    // Keep going without wake(), so lastTime carries over to the next frame.
+    if (isAnimating() || isSettling()) rafId = requestAnimationFrame(frame);
   }
 
   /** Recomputes `running` from the visitor's choice and the media query. */
