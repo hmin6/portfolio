@@ -16,9 +16,11 @@ import {
   PALETTES,
   readThemeColors,
   type ModeId,
+  type Palette,
 } from "./palettes";
 import { drawScene } from "./scene";
 import { createSprites, createWeaveTexture } from "./sprites";
+import { paintStill } from "./still";
 import { paintStrokes, StrokeBudget } from "./strokes";
 
 /*
@@ -71,36 +73,32 @@ export function resolvePaused(userPaused: boolean | null, prefersReducedMotion: 
 }
 
 /*
- * While paused, the engine only paints what is out of date:
+ * While paused, nothing on screen fills in or moves. The frame loop stops,
+ * and the canvas only changes all at once:
  *
- * - Full repaint: the whole canvas, for REPAINT_FRAMES frames. Only when the
- *   canvas isn't fully painted: first load, a resize, a mode change, or a
- *   pause before the opening reveal or a mode blend has finished.
- * - Catch-up: pausing a finished painting. Paint for CATCH_UP_MS so the
- *   last strokes land on the frozen scene, then stop.
- * - Local pass: a lantern added while paused. Paint only a small box around
- *   it, densely, for LOCAL_PASS_FRAMES frames.
+ * - Still: when the canvas isn't a finished painting (first load, a resize,
+ *   a mode change, or a pause during the opening reveal or a mode blend),
+ *   a complete still is painted off screen (still.ts) and swapped in.
+ * - Local pass: a lantern added while paused. Its small box is repainted
+ *   in one go, in the same task as the click.
+ *
+ * Pausing a finished painting just stops: the last frame stays as it is.
  */
 
-/** Full-canvas frames needed to cover the canvas (~2 s at 60 fps). */
-const REPAINT_FRAMES = 110;
-/** Time, not frames, so slow devices don't keep moving longer. */
-const CATCH_UP_MS = 250;
-const LOCAL_PASS_FRAMES = 3;
 /**
- * A local pass paints this many times the usual stroke density, so a few
- * frames are enough to cover its small area.
+ * Live frames after which the canvas counts as a finished painting: about
+ * as many as the opening reveal plus enough normal frames to cover it
+ * (~2 s at 60 fps). Pausing sooner than this paints a still.
  */
-const LOCAL_DENSITY = 20;
+const FILLED_FRAMES = 110;
+/**
+ * A local pass paints this many times the usual per-frame stroke density,
+ * so one pass covers its small area.
+ */
+const LOCAL_DENSITY = 60;
 /** Opening frames that paint extra, larger strokes to cover the blank canvas quickly. */
 const REVEAL_FRAMES = 90;
 const RESIZE_DEBOUNCE_MS = 150;
-
-/** An area to repaint while paused, in device pixels. */
-interface LocalPass {
-  area: Rect;
-  framesLeft: number;
-}
 
 /**
  * Stroke budget ceiling, in proportion to the screen's area: 1800 strokes
@@ -149,26 +147,37 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
   const band: AuroraBand = [];
   let lanterns: Lantern[] = seedLanterns(view);
   const budget = new StrokeBudget(maxStrokes(view));
+  /**
+   * Whether the visible paint canvas has anything on it. A hero that starts
+   * paused leaves it transparent, so the section's dark background shows
+   * until the still is swapped in, instead of a flat underpaint first.
+   */
+  let painted = false;
   sizeCanvases();
+  if (running) fillUnderpaint();
 
   /** Animation time in seconds. Only advances while motion is running. */
   let t = 0;
   /**
    * Full-canvas frames painted since the page loaded. Drives the opening
-   * reveal. A resize doesn't reset it, so the reveal never plays twice.
+   * reveal. A resize doesn't reset it, so the reveal never plays twice, and
+   * a still counts as a finished reveal.
    */
   let frames = 0;
   /**
    * Full-canvas frames painted since the last resize. Until this reaches
-   * REPAINT_FRAMES the canvas may still show a stretched copy of the old
-   * painting, so pausing then repaints it instead of just stopping.
+   * FILLED_FRAMES the canvas may still show a stretched copy of the old
+   * painting, so pausing then paints a still instead of just stopping.
    */
   let framesSinceResize = 0;
-  // Paused work (see the comment above REPAINT_FRAMES). A blank canvas that
-  // starts paused, e.g. for reduced motion, needs a full repaint.
-  let repaintFrames = running ? 0 : REPAINT_FRAMES;
-  let catchUpMs = 0;
-  let localPasses: LocalPass[] = [];
+  /** Cancels the still being painted, or null if none is in progress. */
+  let still: AbortController | null = null;
+  /**
+   * Lantern areas (in device pixels) to repaint while paused. They wait
+   * here while a still is being painted, and are painted right after it is
+   * swapped in.
+   */
+  let localPasses: Rect[] = [];
   let onScreen = true;
   let tabVisible = document.visibilityState === "visible";
   /** Pending requestAnimationFrame id, or 0 if none is scheduled. */
@@ -188,7 +197,7 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
     return createViewport(rect.width, rect.height, window.devicePixelRatio);
   }
 
-  /** Applies `view` to the canvases and lays down the base color. */
+  /** Applies `view` to the canvases, which clears them. */
   function sizeCanvases(): void {
     // Setting a canvas's width or height clears it and resets its context
     // settings, so lineCap has to be set again afterward.
@@ -197,8 +206,14 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
     sceneCanvas.width = view.sceneW;
     sceneCanvas.height = view.sceneH;
     ctx.paint.lineCap = "round";
+    painted = false;
+  }
+
+  /** Lays down the base color the live strokes paint over. */
+  function fillUnderpaint(): void {
     ctx.paint.fillStyle = rgba(palette.underpaint);
     ctx.paint.fillRect(0, 0, view.width, view.height);
+    painted = true;
   }
 
   /** A copy of a canvas's current pixels, or null if there's nothing to copy. */
@@ -221,7 +236,7 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
       return;
     }
     // Resizing a canvas clears it, so copy the painting aside first.
-    const old = frames > 0 ? copyOf(el.paint) : null;
+    const old = painted ? copyOf(el.paint) : null;
     const previous = view;
     view = next;
     layout = createLayout(view);
@@ -232,42 +247,38 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
       // Everything in the scene is placed as a fraction of its width and
       // height (the horizon at 53%, the buildings at the sides), so after
       // stretching, the old painting's horizon and buildings land where the
-      // new scene has them. Normal strokes then repaint the stretched
-      // brushwork. It also matches what the visitor already sees: while the
-      // resize is debounced, the browser stretches the old canvas to the
-      // new size anyway.
+      // new scene has them. It also matches what the visitor already sees:
+      // while the resize is debounced, the browser stretches the old canvas
+      // to the new size anyway.
       ctx.paint.imageSmoothingQuality = "high";
       ctx.paint.drawImage(old, 0, 0, view.width, view.height);
+      painted = true;
+    } else if (running) {
+      fillUnderpaint();
     }
     rescaleLanterns(lanterns, previous, view);
-    framesSinceResize = 0;
-    // A paused hero repaints the stretched copy once (at normal stroke
-    // size, since `frames` isn't reset), then holds still.
-    startRepaint();
     if (lanterns.length === 0) lanterns = seedLanterns(view);
-    wake();
-  }
-
-  function startRepaint(): void {
-    repaintFrames = REPAINT_FRAMES;
-    catchUpMs = 0;
-    localPasses = [];
+    framesSinceResize = 0;
+    if (running) {
+      // Normal strokes repaint the stretched brushwork (at normal stroke
+      // size, since `frames` isn't reset).
+      wake();
+    } else {
+      // Paused: the stretched copy stays still, with its lights redrawn at
+      // the new size, until a still at the new size replaces it.
+      if (painted) drawLightLayer();
+      startStill();
+    }
   }
 
   /*
-   * The frame loop only runs while there is something to draw: motion is
-   * running, or paused work is left. When the hero is off screen or the
-   * tab is hidden, or paused work is done, it stops scheduling frames
-   * entirely, and wake() restarts it when something changes.
+   * The frame loop only runs while motion is running and there is somewhere
+   * to draw. When the hero is off screen, the tab is hidden, or motion is
+   * paused, it stops scheduling frames entirely, and wake() restarts it
+   * when something changes.
    */
-  function canDraw(): boolean {
-    return onScreen && tabVisible;
-  }
-  function hasPausedWork(): boolean {
-    return repaintFrames > 0 || catchUpMs > 0 || localPasses.length > 0;
-  }
   function needsFrame(): boolean {
-    return canDraw() && (running || hasPausedWork());
+    return running && onScreen && tabVisible;
   }
 
   /** Restarts the loop if it is idle and there is something to draw. */
@@ -289,39 +300,28 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
     lastTime = now;
     if (!needsFrame()) return;
 
-    if (running) {
-      // Capped at 50 ms so one slow frame doesn't make everything jump.
-      const dt = Math.min(0.05, elapsedMs / 1000);
-      t += dt;
-      lanterns = updateLanterns(lanterns, view, dt, palette.windowLight > 0.3);
-      // Frame-rate independent easing: each frame keeps 0.25^dt of the
-      // remaining distance, so after one second 25% remains (75% done),
-      // whether that second had 30 frames or 120.
-      lerpPalette(palette, target, 1 - Math.pow(0.25, dt));
-      paintWholeCanvas();
-    } else if (repaintFrames > 0 || catchUpMs > 0) {
-      // Paused, so t stays frozen. No clock to follow, so the palette
-      // eases a fixed 20% per frame.
-      lerpPalette(palette, target, 0.2);
-      paintWholeCanvas();
-      // A whole-canvas pass paints any new lanterns in too.
-      localPasses = [];
-      if (repaintFrames > 0) repaintFrames--;
-      // At least 8 ms per frame, so catch-up always ends even if
-      // timestamps repeat.
-      else catchUpMs -= Math.max(elapsedMs, 8);
-    } else {
-      paintLocalPasses();
-    }
+    // Capped at 50 ms so one slow frame doesn't make everything jump.
+    const dt = Math.min(0.05, elapsedMs / 1000);
+    t += dt;
+    lanterns = updateLanterns(lanterns, view, dt, palette.windowLight > 0.3);
+    // Frame-rate independent easing: each frame keeps 0.25^dt of the
+    // remaining distance, so after one second 25% remains (75% done),
+    // whether that second had 30 frames or 120.
+    lerpPalette(palette, target, 1 - Math.pow(0.25, dt));
+    paintWholeCanvas();
 
     // Keep going without wake(), so lastTime carries over to the next frame.
     if (needsFrame()) rafId = requestAnimationFrame(frame);
   }
 
   /** Redraws the hidden scene and returns its pixels for the strokes. */
-  function renderScene(): Uint8ClampedArray {
-    drawScene({ ctx: ctx.scene, view, layout, palette, sprites, theme, lanterns, t, band });
+  function renderScene(p: Palette = palette): ImageDataArray {
+    drawScene({ ctx: ctx.scene, view, layout, palette: p, sprites, theme, lanterns, t, band });
     return ctx.scene.getImageData(0, 0, view.sceneW, view.sceneH).data;
+  }
+
+  function drawLightLayer(): void {
+    drawLights({ ctx: ctx.lights, view, layout, palette, sprites, theme, lanterns, t });
   }
 
   function paintWholeCanvas(): void {
@@ -336,28 +336,76 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
       1 + reveal * 1.6,
     );
     budget.record(performance.now() - start);
-    drawLights({ ctx: ctx.lights, view, layout, palette, sprites, theme, lanterns, t });
+    drawLightLayer();
     frames++;
     framesSinceResize++;
   }
 
   /**
-   * Paints only the small areas in `localPasses`. With t frozen, the hidden
-   * scene and the light layer redraw exactly as before, apart from what
-   * changed in those areas, so nothing else on screen moves.
+   * Starts painting a still of the target mode off screen, replacing any
+   * still already in progress. The visible canvas doesn't change until the
+   * still is complete; then showStill swaps it in.
+   */
+  function startStill(): void {
+    still?.abort();
+    const job = new AbortController();
+    still = job;
+    // The still is painted with the mode's finished palette, not a blend.
+    // It gets its own copy so the lights keep matching what's on screen
+    // until the swap.
+    const stillPalette = clonePalette(target);
+    const pixels = renderScene(stillPalette);
+    // The scene now includes every current lantern, so earlier local
+    // passes are covered by the still.
+    localPasses = [];
+    void paintStill(
+      { view, layout, band: band.slice(), pixels, t },
+      job.signal,
+    ).then((canvas) => {
+      if (job.signal.aborted || destroyed || !canvas) return;
+      still = null;
+      showStill(canvas, stillPalette);
+    });
+  }
+
+  function cancelStill(): void {
+    still?.abort();
+    still = null;
+  }
+
+  /**
+   * Swaps a finished still onto the visible canvas. The paint and the light
+   * layer change in the same task, so they appear in the same frame.
+   */
+  function showStill(canvas: HTMLCanvasElement, stillPalette: Palette): void {
+    ctx.paint.drawImage(canvas, 0, 0);
+    painted = true;
+    lerpPalette(palette, stillPalette, 1);
+    // A still is a finished painting: resuming motion shouldn't replay the
+    // opening reveal over it, and pausing again shouldn't repaint it.
+    frames = Math.max(frames, REVEAL_FRAMES);
+    framesSinceResize = Math.max(framesSinceResize, FILLED_FRAMES);
+    // Lanterns launched while the still was being painted.
+    if (localPasses.length > 0) paintLocalPasses();
+    else drawLightLayer();
+  }
+
+  /**
+   * Paints only the small areas in `localPasses`, in one go. With t frozen,
+   * the hidden scene and the light layer redraw exactly as before, apart
+   * from what changed in those areas, so nothing else on screen moves.
    */
   function paintLocalPasses(): void {
     const pixels = renderScene();
     const canvasArea = view.width * view.height;
-    for (const pass of localPasses) {
+    for (const area of localPasses) {
       // Same stroke density as a normal frame, times LOCAL_DENSITY.
-      const share = (pass.area.width * pass.area.height) / canvasArea;
-      const count = Math.max(40, Math.round(budget.count * share * LOCAL_DENSITY));
-      paintStrokes({ ctx: ctx.paint, view, layout, band, pixels, t, area: pass.area }, count, 1);
-      pass.framesLeft--;
+      const share = (area.width * area.height) / canvasArea;
+      const count = Math.max(120, Math.round(budget.count * share * LOCAL_DENSITY));
+      paintStrokes({ ctx: ctx.paint, view, layout, band, pixels, t, area }, count, 1);
     }
-    localPasses = localPasses.filter((pass) => pass.framesLeft > 0);
-    drawLights({ ctx: ctx.lights, view, layout, palette, sprites, theme, lanterns, t });
+    localPasses = [];
+    drawLightLayer();
   }
 
   /** Converts a scene-pixel box to device pixels, clipped to the canvas. */
@@ -373,9 +421,7 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
 
   function addLocalPass(lantern: Lantern): void {
     const area = toDeviceRect(lanternBounds(lantern, view));
-    if (area.width > 0 && area.height > 0) {
-      localPasses.push({ area, framesLeft: LOCAL_PASS_FRAMES });
-    }
+    if (area.width > 0 && area.height > 0) localPasses.push(area);
   }
 
   /** Recomputes `running` from the visitor's choice and the media query. */
@@ -385,18 +431,19 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
     running = next;
     localPasses = [];
     if (running) {
-      repaintFrames = 0;
-      catchUpMs = 0;
-    } else if (framesSinceResize >= REPAINT_FRAMES && isPaletteSettled(palette, target)) {
-      // The canvas is fully painted: let the last strokes land, then stop.
-      repaintFrames = 0;
-      catchUpMs = CATCH_UP_MS;
-    } else {
+      // Live strokes take over from here. If no still had landed yet, the
+      // canvas is blank, so the opening reveal plays as usual.
+      cancelStill();
+      if (!painted) fillUnderpaint();
+      wake();
+    } else if (framesSinceResize < FILLED_FRAMES || !isPaletteSettled(palette, target)) {
       // Paused during the opening reveal, partway through a mode blend, or
-      // soon after a resize: finish painting the canvas first.
-      startRepaint();
+      // soon after a resize: the canvas isn't finished, so paint a still.
+      // Until it's ready, the canvas holds still as it is.
+      startStill();
     }
-    wake();
+    // Otherwise the canvas is a finished painting: stop right here. The
+    // loop sees `running` is false and schedules no more frames.
   }
 
   function launchLantern(x: number, y: number): void {
@@ -406,7 +453,8 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
     // spot of any old lantern that was dropped to make room.
     addLocalPass(lanterns[lanterns.length - 1]);
     if (dropped) addLocalPass(dropped);
-    wake();
+    // While a still is being painted, wait for it (see showStill).
+    if (!still) paintLocalPasses();
   }
 
   /**
@@ -455,16 +503,18 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
   );
   reducedMotion.addEventListener("change", updateRunning, { signal });
   watchPixelRatio();
-  wake();
+  // A hero that starts paused (e.g. reduced motion) begins with a still.
+  if (running) wake();
+  else startStill();
 
   return {
     setMode(mode) {
       if (PALETTES[mode] === target) return;
       target = PALETTES[mode];
       // While running, the palette blends as the animation plays. While
-      // paused, the whole canvas is out of date, so repaint it.
-      if (!running) startRepaint();
-      wake();
+      // paused, the whole canvas is out of date, so paint a new still.
+      if (running) wake();
+      else startStill();
     },
     setUserPaused(paused) {
       userPaused = paused;
@@ -487,6 +537,7 @@ export function createPainter(el: PainterElements, options: PainterOptions): Pai
       destroyed = true;
       cancelAnimationFrame(rafId);
       rafId = 0;
+      cancelStill();
       clearTimeout(resizeTimer);
       listeners.abort();
       resizeObserver.disconnect();
