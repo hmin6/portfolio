@@ -19,8 +19,13 @@
  *   mist           9.01       7.44
  *   magenta        7.64       6.31
  *   violet         4.44       3.67   <- fails AA: decorative only, never text
+ *
+ * `static` makes Tailwind output every variable below, even ones no class
+ * uses. Without it, Tailwind only outputs the variables a class needs, and
+ * the hero painter, which reads tokens like `--color-violet` from JavaScript,
+ * would find them missing.
  */
-@theme {
+@theme static {
   /* Remove Tailwind's built-in palette (zinc-500, blue-600, ...) so only the
      colors below exist. `transparent`, `current`, and `inherit` are not theme
      colors, so they keep working. */
