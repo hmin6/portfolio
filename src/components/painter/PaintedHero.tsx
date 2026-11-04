@@ -1,36 +1,9 @@
 "use client";
 
-import {
-  useEffect,
-  useEffectEvent,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type MouseEvent,
-  type ReactNode,
-} from "react";
-import { createPainter, REDUCED_MOTION_QUERY, resolvePaused, type Painter } from "./engine";
+import { useEffect, useEffectEvent, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { resolvePaused, setUserPaused, usePrefersReducedMotion, useUserPaused } from "../motion";
+import { createPainter, type Painter } from "./engine";
 import { MODES, type ModeId } from "./palettes";
-
-/*
- * prefers-reduced-motion as React state, for the Pause button's pressed
- * look. useSyncExternalStore subscribes to something outside React (here a
- * media query). On the server there's no media query, so getServerSnapshot
- * says "no preference"; after hydration React re-reads the real value
- * without a hydration error. The engine reads the media query itself, so
- * this value never controls the animation.
- */
-function subscribeReducedMotion(onChange: () => void): () => void {
-  const query = window.matchMedia(REDUCED_MOTION_QUERY);
-  query.addEventListener("change", onChange);
-  return () => query.removeEventListener("change", onChange);
-}
-function getReducedMotion(): boolean {
-  return window.matchMedia(REDUCED_MOTION_QUERY).matches;
-}
-function getServerReducedMotion(): boolean {
-  return false;
-}
 
 /*
  * Pill buttons over the painting. `aria-pressed:` styles apply only when
@@ -71,13 +44,13 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
   const painterRef = useRef<Painter | null>(null);
 
   const [mode, setMode] = useState<ModeId>("night");
-  /** The visitor's explicit choice; null until they press Pause motion. */
-  const [userPaused, setUserPaused] = useState<boolean | null>(null);
-  const prefersReducedMotion = useSyncExternalStore(
-    subscribeReducedMotion,
-    getReducedMotion,
-    getServerReducedMotion,
-  );
+  /**
+   * The visitor's explicit choice, null until they press Pause motion. It's
+   * site-wide (motion.ts), so the string dividers follow it too.
+   */
+  const userPaused = useUserPaused();
+  // The engine reads the media query itself; this is for the button's state.
+  const prefersReducedMotion = usePrefersReducedMotion();
   // Same rule the engine uses, so the button always matches the painting.
   const paused = resolvePaused(userPaused, prefersReducedMotion);
 
