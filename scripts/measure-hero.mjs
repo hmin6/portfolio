@@ -1094,6 +1094,53 @@ async function pluckDivider(cdp) {
   return { running, after };
 }
 
+/** Where the page is scrolled to, and whether the footer is on screen. */
+const SCROLL_STATE = String.raw`(() => {
+  const f = document.querySelector("footer").getBoundingClientRect();
+  return { scrollY: Math.round(scrollY), atTop: scrollY < 1, footerOnScreen: f.top < innerHeight && f.bottom > 0, hash: location.hash };
+})()`;
+
+/** A real mouse click (or tap) on the first element matching `selector`. */
+async function clickAt(cdp, selector) {
+  const at = await cdp.evaluate(`(() => {
+    const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  })()`);
+  const click = { ...at, button: "left", clickCount: 1 };
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...click });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...click });
+  await sleep(500);
+  return cdp.evaluate(SCROLL_STATE);
+}
+
+/**
+ * The header's links, clicked more than once, the way a visitor would:
+ * Contact must reach the footer every time (even when the URL already ends
+ * in #contact), and my name must go to the top of the home page every time.
+ */
+async function headerLinks(cdp) {
+  const contact = `header nav a[href="/#contact"]`;
+  const brand = `header a[href="/"]`;
+  // The header isn't sticky, so scroll back up before each click, as a
+  // visitor would. For my name only 20px, so the header is still on screen
+  // and "back to the top" is a real move.
+  const scrollTo = (y) => cdp.evaluate(`window.scrollTo(0, ${y})`);
+  const out = {};
+  await scrollTo(0);
+  out.contactFirst = await clickAt(cdp, contact);
+  await scrollTo(0);
+  out.contactAgain = await clickAt(cdp, contact);
+  await scrollTo(20);
+  out.brandAfterContact = await clickAt(cdp, brand);
+  await scrollTo(20);
+  out.brandAgain = await clickAt(cdp, brand);
+  out.contactAfterBrand = await clickAt(cdp, contact);
+  out.ok =
+    out.contactFirst.footerOnScreen && out.contactAgain.footerOnScreen && out.contactAfterBrand.footerOnScreen &&
+    out.brandAfterContact.atTop && out.brandAgain.atTop;
+  return out;
+}
+
 async function pageTest(cdp) {
   const out = {};
   for (const vp of VIEWPORTS.filter((v) => ["desktop", "phone", "narrow"].includes(v.name))) {
@@ -1147,6 +1194,9 @@ async function pageTest(cdp) {
     await pressTab(cdp);
     const afterSkip = await cdp.evaluate(FOCUSED);
     r.skipLink = { first: skip, nextAfterEnter: afterSkip };
+
+    // Contact and my name, clicked repeatedly (only while the links are inline).
+    if (!r.nav.menuButton) r.links = await headerLinks(cdp);
 
     // The Menu fallback, when the links don't fit.
     if (r.nav.menuButton) {
@@ -1258,6 +1308,13 @@ function summarize(report) {
     for (const mode of MODES) {
       const seam = r[`seam-${mode.slug}`];
       if (seam) lines.push(`page ${vp}: hero bottom ${mode.slug} last row ${seam.heroLastRow} vs page ${seam.pageBelow} (max diff ${seam.maxChannelDiff})`);
+    }
+    if (r.links) {
+      if (!r.links.ok) failures++;
+      const steps = Object.entries(r.links)
+        .filter(([k]) => k !== "ok")
+        .map(([k, s]) => `${k} y=${s.scrollY}${s.hash}${s.footerOnScreen ? " footer" : ""}${s.atTop ? " top" : ""}`);
+      lines.push(`page ${vp}: header links ${r.links.ok ? "ok" : "*"}  ${steps.join(", ")}`);
     }
     if (r.menu) lines.push(`page ${vp}: menu ${JSON.stringify(r.menu)}`);
     if (r.divider) lines.push(`page ${vp}: divider ${JSON.stringify(r.divider)}`);

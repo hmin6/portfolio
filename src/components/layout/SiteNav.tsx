@@ -17,6 +17,36 @@ function currentFor(item: NavItem, pathname: string): "page" | "true" | undefine
   return undefined;
 }
 
+/**
+ * `onNavigate` for the header's links: a link to a place on the page you're
+ * already on ("/#contact" or "/" while on /) scrolls there itself, every
+ * time, instead of going through the Next.js router.
+ *
+ * The router only scrolls to a #hash when the hash changes, so a second
+ * click on Contact (URL already /#contact), or my name on / scrolled down,
+ * did nothing. Worse, that ignored click left "contact" saved as the
+ * router's pending scroll target, and the next hash-only navigation (my
+ * name, back to /) scrolled to the footer instead of the top.
+ *
+ * Here the page scrolls like a plain <a href="#..."> would, and the new URL
+ * goes into history with pushState, which the router keeps in sync with.
+ * Links to other pages still navigate normally. Next.js only calls
+ * onNavigate for a plain click, so Ctrl/Cmd-click still opens a new tab.
+ */
+function scrollWithinPage(event: { preventDefault(): void }, href: string) {
+  const url = new URL(href, window.location.href);
+  if (url.pathname !== window.location.pathname || url.search !== window.location.search) return;
+  const target = url.hash ? document.getElementById(decodeURIComponent(url.hash.slice(1))) : null;
+  // A #hash for a section that isn't on the page: leave it to the router.
+  if (url.hash && !target) return;
+  event.preventDefault();
+  // Push before scrolling: the browser saves the scroll position of the
+  // entry being left when the new one is pushed, so Back returns there.
+  if (url.href !== window.location.href) window.history.pushState(null, "", url.href);
+  if (target) target.scrollIntoView();
+  else window.scrollTo(0, 0);
+}
+
 const linkStyle =
   "inline-flex min-h-11 items-center rounded-full px-3 text-sm font-medium whitespace-nowrap text-haze hover:text-starlight aria-[current]:text-starlight aria-[current]:underline aria-[current]:decoration-brass aria-[current]:underline-offset-8";
 
@@ -93,10 +123,16 @@ export default function SiteNav({ items }: { items: readonly NavItem[] }) {
     return () => listeners.abort();
   }, [menuOpen]);
 
-  const links = (onNavigate?: () => void) =>
+  const links = (onPick?: () => void) =>
     items.map((item) => (
       <li key={item.href} className="shrink-0">
-        <Link href={item.href} aria-current={currentFor(item, pathname)} onClick={onNavigate} className={linkStyle}>
+        <Link
+          href={item.href}
+          aria-current={currentFor(item, pathname)}
+          onClick={onPick}
+          onNavigate={(event) => scrollWithinPage(event, item.href)}
+          className={linkStyle}
+        >
           {item.label}
         </Link>
       </li>
@@ -107,6 +143,7 @@ export default function SiteNav({ items }: { items: readonly NavItem[] }) {
       <Link
         href="/"
         aria-current={pathname === "/" ? "page" : undefined}
+        onNavigate={(event) => scrollWithinPage(event, "/")}
         className="inline-flex min-h-11 shrink-0 items-center rounded-full font-heading text-lg text-starlight"
       >
         {SITE.name}
