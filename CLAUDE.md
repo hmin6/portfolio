@@ -17,8 +17,10 @@ Personal portfolio for backend (Spring Boot/PostgreSQL) and data science roles.
 - Palette: night #0B1026, panel #1A2147, aurora green #3DFFB0, teal #2DD4BF,
   violet #8B5CF6 (decorative only, not text), magenta #E879F9 (sparing),
   starlight text #E8ECF8, brass accent #E0B66A
-- Projects shown as framed paintings in "The Collection," each with a
-  "Medium:" placard listing the tech stack and a "liner notes" case study page
+- Projects shown in "The Collection": in-progress and finished projects as framed
+  paintings, each with a "Medium:" placard listing the tech stack and a "liner notes"
+  case study page; planned projects as "studies" (sketch-like cards, visually distinct
+  from the paintings), each labeled "Planned" with a draft Medium placard
 - String dividers: thin brass (#E0B66A) SVG lines between sections, slightly wavy like a
   guitar string at rest; on hover they briefly vibrate like a plucked string, then settle.
   Decorative only (aria-hidden), and still with prefers-reduced-motion
