@@ -54,3 +54,6 @@ The single lightest pixel behind the heading is 4.34:1 (phone in landscape, Nigh
 - Harder: the scrim has to stay under the controls. The text block comes after the controls in the page and starts its own stacking context, so on narrow phones, where the block is tall, its scrim reached up over the pills and dimmed their borders until the controls got `z-10`.
 - Harder: any new text over the hero has to go inside the text block, or get its own measurement. Elements with their own `shadow-*` or `ring-*` classes need `focus-visible:shadow-focus` to keep the focus ring's dark bands.
 - The numbers come from headless Edge with emulated devices. They still need a check on a real phone.
+
+## Update (2026-11-04, #7)
+The site header (ADR-009) made the hero 56px shorter. The painting is laid out by the hero's height, so on a 320×568 phone at Night the heading moved closer to the bright aurora, and its lightest 1% fell to about 3.8:1. The Night scrim went from 50% to 60%, the same as Golden hour, which brought it to about 5.2:1. Day stays at 80%.

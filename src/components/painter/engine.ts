@@ -1,3 +1,4 @@
+import { REDUCED_MOTION_QUERY, resolvePaused } from "../motion";
 import { rgba } from "./color";
 import {
   addLantern,
@@ -59,17 +60,6 @@ export interface Painter {
   lanternAt(clientX: number, clientY: number): void;
   /** Stops the loop and removes every listener and observer. Safe to call twice. */
   destroy(): void;
-}
-
-export const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
-
-/**
- * Whether motion is paused: the visitor's explicit choice wins; otherwise
- * prefers-reduced-motion decides. PaintedHero uses the same function for
- * the Pause motion button, so the button and the engine can't disagree.
- */
-export function resolvePaused(userPaused: boolean | null, prefersReducedMotion: boolean): boolean {
-  return userPaused ?? prefersReducedMotion;
 }
 
 /*
