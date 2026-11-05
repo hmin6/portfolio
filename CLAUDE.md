@@ -53,9 +53,11 @@ Never present unbuilt features as finished. Hackathon projects are not shown on 
 - Run `npm run build` and `npm run lint` before saying a task is done
 - Accessible: semantic HTML, keyboard focus, good contrast, alt text
 - After each PR, draft a devlog entry in docs/devlog/ named <issue-number>-short-name.md,
-  following docs/devlog/TEMPLATE.md. Before writing "What I learned," ask me 2–3 short
-  questions about what was new, surprising, or difficult for me, then write the section
-  in first person from my answers. Keep my wording where possible.
+  following docs/devlog/TEMPLATE.md. Write "What I learned" only after I've reported my
+  manual checks and any bugs they found are fixed and I've retested them. Until then,
+  keep the devlog draft uncommitted and don't ask me the "What I learned" questions.
+  Then ask me 2–3 short questions about what was new, surprising, or difficult for me,
+  and write the section in first person from my answers. Keep my wording where possible.
 - Record major technical decisions as ADRs in docs/decisions/, following
   docs/decisions/TEMPLATE.md, numbered ADR-001, ADR-002, and so on.
 - When I report the results of manual checks (for example on my phone or by tabbing
