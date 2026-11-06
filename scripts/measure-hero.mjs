@@ -20,7 +20,9 @@
  *                    or Pause motion, the painting never fills in or moves
  *   --page           also run the shared-layout checks (#7): landmarks, the
  *                    nav (inline or Menu), skip link, full-page Tab order,
- *                    string dividers, and the hero's fade into the page
+ *                    string dividers, and the hero's fade into the page;
+ *                    and the Collection (#8): its structure, labels, links,
+ *                    and screenshots, and the Work link reaching it
  *
  * Output goes to hero-measurements/ (git-ignored): one screenshot per viewport
  * and mode, rotation frames, and <label>-report.json. A summary is printed at
@@ -1058,7 +1060,56 @@ const LANDMARKS = String.raw`(() => ({
   main: document.querySelectorAll("main").length,
   footer: document.querySelectorAll("body > footer").length,
   contactTarget: !!document.getElementById("contact"),
+  collectionTarget: !!document.getElementById("collection"),
 }))()`;
+
+/**
+ * The Collection (#8): where it sits, its heading, and each card's name,
+ * kind, status, Medium label, and artwork label. Links and focusable
+ * elements are counted so a link to a page that doesn't exist yet shows
+ * up, and animations so anything that moves does.
+ */
+const COLLECTION = String.raw`(() => {
+  const section = document.getElementById("collection");
+  if (!section) return null;
+  const hero = "[aria-labelledby=hero-title]";
+  const cards = [...section.querySelectorAll("article")].map((a) => {
+    const ps = [...a.querySelectorAll("p")].map((p) => p.textContent.trim());
+    return {
+      title: a.querySelector("h3")?.textContent.trim() ?? null,
+      named: document.getElementById(a.getAttribute("aria-labelledby"))?.textContent.trim() ?? null,
+      kind: a.dataset.kind ?? null,
+      status: ps.find((t) => t.startsWith("Status:"))?.slice(7).trim() ?? null,
+      medium: ps.find((t) => t.startsWith("Medium"))?.split(":")[0] ?? null,
+      artworkLabeled: [...a.querySelectorAll("svg")].every((svg) => svg.getAttribute("role") === "img" && !!svg.getAttribute("aria-label")),
+    };
+  });
+  const r = section.getBoundingClientRect();
+  return {
+    heading: document.getElementById(section.getAttribute("aria-labelledby"))?.textContent.trim() ?? null,
+    afterHero: !!section.previousElementSibling?.matches(hero),
+    beforeFooter: !section.nextElementSibling && section.closest("main")?.nextElementSibling?.tagName === "FOOTER",
+    dividerAtTop: !!section.firstElementChild?.matches("div[aria-hidden=true]"),
+    cards,
+    links: [...section.querySelectorAll("a[href]")].map((a) => a.getAttribute("href")),
+    focusable: section.querySelectorAll("a[href], button, input, select, textarea, [tabindex]:not([tabindex='-1'])").length,
+    animations: section.getAnimations({ subtree: true }).length,
+    height: Math.round(r.height),
+    horizontalScroll: document.documentElement.scrollWidth > innerWidth,
+  };
+})()`;
+
+/** Whether the Collection report meets #8: placement, names, labels, studies for planned work, nothing moving. */
+function collectionOk(c) {
+  if (!c) return false;
+  return (
+    c.heading === "The Collection" && c.afterHero && c.beforeFooter && c.dividerAtTop &&
+    c.cards.length > 0 &&
+    c.cards.every((card) => card.title && card.named === card.title && card.status && card.medium && card.artworkLabeled) &&
+    c.cards.every((card) => !card.status.startsWith("Planned") || (card.kind === "study" && card.medium === "Medium (draft)")) &&
+    c.animations === 0 && !c.horizontalScroll
+  );
+}
 
 /** Mean color of the last pixel row of the hero and the first row below it, from a screenshot. */
 const SEAM = String.raw`async (shot, dpr) => {
@@ -1102,7 +1153,14 @@ async function pluckDivider(cdp) {
 /** Where the page is scrolled to, and whether the footer is on screen. */
 const SCROLL_STATE = String.raw`(() => {
   const f = document.querySelector("footer").getBoundingClientRect();
-  return { scrollY: Math.round(scrollY), atTop: scrollY < 1, footerOnScreen: f.top < innerHeight && f.bottom > 0, hash: location.hash };
+  const c = document.getElementById("collection")?.getBoundingClientRect();
+  return {
+    scrollY: Math.round(scrollY),
+    atTop: scrollY < 1,
+    footerOnScreen: f.top < innerHeight && f.bottom > 0,
+    collectionAtTop: !!c && Math.abs(c.top) < 2,
+    hash: location.hash,
+  };
 })()`;
 
 /** A real mouse click (or tap) on the first element matching `selector`. */
@@ -1121,10 +1179,12 @@ async function clickAt(cdp, selector) {
 /**
  * The header's links, clicked more than once, the way a visitor would:
  * Contact must reach the footer every time (even when the URL already ends
- * in #contact), and my name must go to the top of the home page every time.
+ * in #contact), Work must bring the Collection to the top of the screen
+ * every time, and my name must go to the top of the home page every time.
  */
 async function headerLinks(cdp) {
   const contact = `header nav a[href="/#contact"]`;
+  const work = `header nav a[href="/#collection"]`;
   const brand = `header a[href="/"]`;
   // The header isn't sticky, so scroll back up before each click, as a
   // visitor would. For my name only 20px, so the header is still on screen
@@ -1140,7 +1200,14 @@ async function headerLinks(cdp) {
   await scrollTo(20);
   out.brandAgain = await clickAt(cdp, brand);
   out.contactAfterBrand = await clickAt(cdp, contact);
+  await scrollTo(0);
+  out.workFirst = await clickAt(cdp, work);
+  await scrollTo(0);
+  out.workAgain = await clickAt(cdp, work);
+  await scrollTo(20);
+  out.brandAfterWork = await clickAt(cdp, brand);
   out.ok =
+    out.workFirst.collectionAtTop && out.workAgain.collectionAtTop && out.brandAfterWork.atTop &&
     out.contactFirst.footerOnScreen && out.contactAgain.footerOnScreen && out.contactAfterBrand.footerOnScreen &&
     out.brandAfterContact.atTop && out.brandAgain.atTop;
   return out;
@@ -1158,6 +1225,19 @@ async function pageTest(cdp) {
     r.landmarks = await cdp.evaluate(LANDMARKS);
     r.nav = await cdp.evaluate(NAV_STATE);
     r.layout = await cdp.evaluate(LAYOUT);
+    r.collection = await cdp.evaluate(COLLECTION);
+
+    // The Collection, screen by screen from its top.
+    if (vp.name !== "narrow" && r.collection) {
+      const top = await cdp.evaluate(`Math.round(document.getElementById("collection").getBoundingClientRect().top + scrollY)`);
+      const screens = Math.ceil(r.collection.height / vp.height);
+      for (let i = 0; i < screens; i++) {
+        await cdp.evaluate(`window.scrollTo(0, ${top + i * vp.height})`);
+        await sleep(200);
+        await screenshot(cdp, `${args.label}-collection-${vp.name}-${i + 1}.png`);
+      }
+      await cdp.evaluate(`window.scrollTo(0, 0)`);
+    }
 
     // Screenshots: the first screen and the bottom of the page, in each mode.
     if (vp.name !== "narrow") {
@@ -1314,11 +1394,16 @@ function summarize(report) {
       const seam = r[`seam-${mode.slug}`];
       if (seam) lines.push(`page ${vp}: hero bottom ${mode.slug} last row ${seam.heroLastRow} vs page ${seam.pageBelow} (max diff ${seam.maxChannelDiff})`);
     }
+    if (r.collection !== undefined) {
+      const ok = collectionOk(r.collection);
+      if (!ok) failures++;
+      lines.push(`page ${vp}: collection ${ok ? "ok" : "*"}  ${JSON.stringify(r.collection)}`);
+    }
     if (r.links) {
       if (!r.links.ok) failures++;
       const steps = Object.entries(r.links)
         .filter(([k]) => k !== "ok")
-        .map(([k, s]) => `${k} y=${s.scrollY}${s.hash}${s.footerOnScreen ? " footer" : ""}${s.atTop ? " top" : ""}`);
+        .map(([k, s]) => `${k} y=${s.scrollY}${s.hash}${s.footerOnScreen ? " footer" : ""}${s.collectionAtTop ? " collection" : ""}${s.atTop ? " top" : ""}`);
       lines.push(`page ${vp}: header links ${r.links.ok ? "ok" : "*"}  ${steps.join(", ")}`);
     }
     if (r.menu) lines.push(`page ${vp}: menu ${JSON.stringify(r.menu)}`);
