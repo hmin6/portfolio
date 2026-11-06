@@ -14,7 +14,7 @@ export default function SiteFooter() {
   return (
     <footer id="contact" className="bg-night">
       <StringDivider />
-      <div className="flex flex-col gap-8 px-[clamp(16px,4vw,48px)] pt-10 pb-12 sm:flex-row sm:items-start sm:justify-between">
+      <div className="page-container flex flex-col gap-8 pt-10 pb-12 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-col gap-2">
           <h2 className="text-2xl">Contact</h2>
           <ul className="flex flex-col sm:flex-row sm:flex-wrap sm:gap-x-6">

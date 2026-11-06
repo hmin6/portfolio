@@ -72,6 +72,30 @@
   --font-heading: var(--font-fraunces), ui-serif, Georgia, serif;
 }
 
+/*
+ * The page's content column: the header row, the string dividers, the
+ * Collection, and the footer all use it, so their left and right edges
+ * line up at every width. Full width with the page gutter up to
+ * --content-max, then centered. The hero painting doesn't use it: it
+ * stays full-bleed.
+ *
+ * Why 1440px: at 1440px and below (laptops and most desktop screens) the
+ * layout is exactly as designed and measured, with the 48px gutter. On
+ * wider monitors, stretching further would only make the painting and
+ * study cards bigger and the space between them wider, while the text is
+ * already capped at a comfortable line length. Capping the column keeps
+ * the page's proportions, and centering it keeps the margins even.
+ *
+ * `@utility` makes this a Tailwind utility, so it works like any other
+ * class and can be combined with responsive variants.
+ */
+@utility page-container {
+  width: 100%;
+  max-width: var(--content-max);
+  margin-inline: auto;
+  padding-inline: var(--page-gutter);
+}
+
 @layer base {
   :root {
     /* Tells the browser the page is dark, so scrollbars and form controls
@@ -83,6 +107,10 @@
        padding is also the height of its fade into the page (PaintedHero). */
     --header-h: 3.5rem;
     --hero-pb: clamp(36px, 8vh, 80px);
+    /* The side margin of the page, from 16px on phones to 48px. */
+    --page-gutter: clamp(16px, 4vw, 48px);
+    /* The widest the page's content gets (see page-container below). */
+    --content-max: 1440px;
   }
 
   body {

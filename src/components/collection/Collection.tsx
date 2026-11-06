@@ -156,12 +156,8 @@ export default function Collection() {
   return (
     <section id="collection" aria-labelledby="collection-title" className="bg-night">
       <StringDivider />
-      {/*
-        Same side padding as the header, hero, and footer, so the heading
-        lines up with theirs. Not centered: on very wide screens the cards
-        stop growing at 1536px and stay on the left, under the header.
-      */}
-      <div className="flex max-w-[1536px] flex-col gap-10 px-[clamp(16px,4vw,48px)] pt-12 pb-16 sm:pt-16 sm:pb-20">
+      {/* page-container (globals.css): the same column as the header and footer, so their edges line up at every width. */}
+      <div className="page-container flex flex-col gap-10 pt-12 pb-16 sm:pt-16 sm:pb-20">
         <div className="flex max-w-[44em] flex-col gap-3">
           <h2 id="collection-title" className="text-[clamp(30px,4vw,44px)] leading-tight">
             The Collection
