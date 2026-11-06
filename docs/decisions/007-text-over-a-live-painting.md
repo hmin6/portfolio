@@ -61,16 +61,16 @@ The site header (ADR-009) made the hero 56px shorter. The painting is laid out b
 ## Update (2026-11-06, #29)
 On screens wider than 1440px, the hero's text and controls now line up with the page's content column (the `page-inset` utility in `globals.css`) instead of sitting at the screen edge. That puts the text over a different part of the painting: at 2560px it moved from the dark left building to the open canal, about 24–49% of the way across. The pass bars now also cover two wider desktops, 1920×1080 and 2560×1440, which `npm run measure:hero` measures as `desktop-1920` and `desktop-2560`.
 
-The scrim didn't need to change. Lightest 1% of pixels, worst case across Night, Golden hour, and Day at those two widths, before and after the move:
+Contrast passed with the scrim unchanged. But over the open water in Day at 2560px, the whole scrim ellipse came into view, and it read as a dark oval floating on the light water. At 1440px its left side runs off the screen, so it reads as shade toward the side of the painting. So above 1440px only, the scrim now keeps the ellipse's right half and replaces its left half with shade that runs out to the hero's left edge (a wide-screen utility in `globals.css`). The two halves are side-by-side background tiles on one element, with the same top-to-bottom profile where they meet, so there's no seam. At 1440px and below, the scrim's computed style and box are identical to before.
 
-| | Before | After |
-|---|---|---|
-| Heading | 12.43 | 11.06 |
-| Intro | 11.97 | 11.89 |
-| Pill text | 10.21 | 10.09 |
-| Focus ring | 3.93 | 3.92 |
-| Pill edges | 3.19 | 3.20 |
+Lightest 1% of pixels, worst case across Night, Golden hour, and Day at 1920 and 2560px:
 
-At 1440px and on the four phone sizes the text and controls are in exactly the same place as before, so their results are unchanged apart from run-to-run variation in the moving painting.
+| | Before the move | Moved, oval scrim | Moved, scrim to the left edge |
+|---|---|---|---|
+| Heading | 12.43 | 11.06 | 12.61 |
+| Intro | 11.97 | 11.89 | 11.81 |
+| Pill text | 10.21 | 10.09 | 10.22 |
+| Focus ring | 3.93 | 3.92 | 3.92 |
+| Pill edges | 3.19 | 3.20 | 3.19 |
 
-One visible difference: over the open water in Day at 2560px, the whole scrim ellipse is in view, so it reads more as a soft dark oval than it does at 1440, where its left side runs off the screen.
+Left of the text block's center, the new scrim is at least as dark as the oval was, and right of it nothing changed, so it can't lower the text's contrast. The small differences are run-to-run variation in the moving painting. At 1440px and on the four phone sizes the text and controls are in exactly the same place as before, and their results differ from earlier runs only by that same variation.
