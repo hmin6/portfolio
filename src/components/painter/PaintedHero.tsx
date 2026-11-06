@@ -106,6 +106,12 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
    * The column fills the screen below the site header (--header-h, in
    * globals.css), so the hero still ends at the bottom of the first screen.
    *
+   * `page-inset` (globals.css) pads the controls and text onto the page's
+   * content column, the same edges as the header and the Collection, so on
+   * screens wider than the column they move in with it. The canvases and
+   * overlays are absolutely positioned, which ignores padding, so the
+   * painting still fills the full width.
+   *
    * The controls and text need `relative` to paint above the absolutely
    * positioned canvases. `data-mode` and `data-paused` let the text scrim
    * change with the mode and motion setting (see below).
@@ -117,7 +123,7 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
       data-mode={mode}
       data-paused={paused ? "" : undefined}
       onClick={handleHeroClick}
-      className="group/hero relative flex min-h-[min(calc(100svh_-_var(--header-h)),1100px)] flex-col justify-between gap-8 overflow-hidden bg-deep px-(--page-gutter) pt-[clamp(16px,3vh,28px)] pb-(--hero-pb) text-starlight"
+      className="group/hero relative flex min-h-[min(calc(100svh_-_var(--header-h)),1100px)] flex-col justify-between gap-8 overflow-hidden bg-deep page-inset pt-[clamp(16px,3vh,28px)] pb-(--hero-pb) text-starlight"
     >
       <canvas ref={paintRef} role="img" aria-label={description} className="absolute inset-0 block size-full" />
       <canvas
