@@ -54,7 +54,8 @@ export default function StringDivider() {
 
   return (
     // 24px tall so the 1px line is easy to hover; the line sits in the middle.
-    <div aria-hidden="true" onPointerEnter={pluck} className="flex h-6 items-center px-[clamp(16px,4vw,48px)]">
+    // page-container: the line spans the same column as the content around it.
+    <div aria-hidden="true" onPointerEnter={pluck} className="page-container flex h-6 items-center">
       {/*
         The viewBox is 1000 wide and 12 tall; preserveAspectRatio="none"
         stretches it to any width. vector-effect keeps the stroke 1px wide

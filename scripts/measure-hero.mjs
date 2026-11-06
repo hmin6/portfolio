@@ -20,7 +20,9 @@
  *                    or Pause motion, the painting never fills in or moves
  *   --page           also run the shared-layout checks (#7): landmarks, the
  *                    nav (inline or Menu), skip link, full-page Tab order,
- *                    string dividers, and the hero's fade into the page
+ *                    string dividers, and the hero's fade into the page;
+ *                    and the Collection (#8): its structure, labels, links,
+ *                    and screenshots, and the Work link reaching it
  *
  * Output goes to hero-measurements/ (git-ignored): one screenshot per viewport
  * and mode, rotation frames, and <label>-report.json. A summary is printed at
@@ -66,6 +68,11 @@ const { values: args } = parseArgs({
 });
 
 const OUT_DIR = "hero-measurements";
+/*
+ * The page has more than one <section> (the hero, then the Collection), so
+ * every hero measurement finds the hero by its label, written in the browser
+ * as [aria-labelledby=hero-title], never as a bare "section".
+ */
 const PORT = 9333;
 
 /** Pass bars (ADR-007). */
@@ -91,6 +98,66 @@ const MODES = [
 ];
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/*
+ * Timeouts, so a stuck run fails with a message instead of hanging. A run
+ * during #8 sat for over two hours on one step.
+ *
+ * Every wait in this script is either sleep() (which always ends) or a
+ * DevTools command waiting for the browser's answer, so a hang means a
+ * command that never got one. Two limits:
+ *
+ * - COMMAND_TIMEOUT_MS, 30 s, for each command. The longest a command is
+ *   meant to take is 15 s: WAIT_FOR_SWAP waits up to 15 s in the page for a
+ *   still frame. Measured with every option on (#8), the slowest command
+ *   took 2.2 s (a phone screenshot, and an evaluate in the still checks).
+ *   30 s is twice the designed maximum, so a slower machine doesn't trip
+ *   it, and a real hang fails within half a minute instead of hours.
+ * - STEP_TIMEOUT_MS, 5 minutes, for each step (one viewport's contrast
+ *   pass, one viewport's page checks, the still-frame checks, ...). A
+ *   backstop for a step that keeps getting answers but never finishes, for
+ *   example a loop waiting for something that never happens. Measured, the
+ *   slowest step took 116 s ("contrast phone"); the others took 13–107 s.
+ *   5 minutes is about 2.5 times the slowest, room for a slower machine.
+ *   It doesn't need to be tight: a stuck command is caught at 30 s.
+ *
+ * A timeout names the step (and the part of it) that was running, writes
+ * what was measured so far to the report, and exits with code 1. Each
+ * step's duration and the slowest command are in the report under
+ * `timing`, so the limits can be checked against real runs.
+ */
+const COMMAND_TIMEOUT_MS = 30_000;
+const STEP_TIMEOUT_MS = 300_000;
+/** For opening the connection to the browser. */
+const CONNECT_TIMEOUT_MS = 10_000;
+
+/** The step running now, and which part of it, for timeout messages. */
+const where = { step: "starting the browser", detail: "" };
+const describeWhere = () => `step "${where.step}"${where.detail ? ` (${where.detail})` : ""}`;
+/** Sets which part of the current step is running. */
+const note = (detail) => {
+  where.detail = detail;
+};
+
+/** How long each step took, and the slowest single command, in ms. */
+const timing = { steps: {}, slowestCommand: null };
+
+/** Runs one step, failing it if it takes longer than `budget` ms. */
+async function step(name, fn, budget = STEP_TIMEOUT_MS) {
+  where.step = name;
+  where.detail = "";
+  const started = performance.now();
+  let timer;
+  const overBudget = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timed out: ${describeWhere()} took longer than ${budget / 1000} s.`)), budget);
+  });
+  try {
+    return await Promise.race([fn(), overBudget]);
+  } finally {
+    clearTimeout(timer);
+    timing.steps[name] = Math.round(performance.now() - started);
+  }
+}
 
 function findBrowser() {
   const candidates = [
@@ -135,7 +202,13 @@ async function connect() {
   if (!wsUrl) throw new Error("The browser didn't open a debugging port.");
 
   const ws = new WebSocket(wsUrl);
-  await new Promise((resolve) => ws.addEventListener("open", resolve));
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Timed out: the browser's debugging connection didn't open within ${CONNECT_TIMEOUT_MS / 1000} s.`)), CONNECT_TIMEOUT_MS);
+    ws.addEventListener("open", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
   let nextId = 1;
   const pending = new Map();
   ws.addEventListener("message", (event) => {
@@ -146,11 +219,39 @@ async function connect() {
     if (msg.error) waiter.reject(new Error(msg.error.message));
     else waiter.resolve(msg.result);
   });
+  // If the browser crashes or closes, fail every waiting command now
+  // instead of letting each one run out its timeout.
+  ws.addEventListener("close", () => {
+    for (const waiter of pending.values()) waiter.reject(new Error(`The browser connection closed during ${describeWhere()}.`));
+    pending.clear();
+  });
 
+  /**
+   * Sends a DevTools command and waits for the answer, for at most
+   * COMMAND_TIMEOUT_MS. Also records the slowest command of the run.
+   */
   const send = (method, params = {}) =>
     new Promise((resolve, reject) => {
       const id = nextId++;
-      pending.set(id, { resolve, reject });
+      const started = performance.now();
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`Timed out: ${method} got no answer from the browser within ${COMMAND_TIMEOUT_MS / 1000} s, during ${describeWhere()}.`));
+      }, COMMAND_TIMEOUT_MS);
+      pending.set(id, {
+        resolve: (result) => {
+          clearTimeout(timer);
+          const ms = Math.round(performance.now() - started);
+          if (!timing.slowestCommand || ms > timing.slowestCommand.ms) {
+            timing.slowestCommand = { method, ms, during: describeWhere() };
+          }
+          resolve(result);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
       ws.send(JSON.stringify({ id, method, params }));
     });
   const evaluate = async (expression) => {
@@ -220,14 +321,14 @@ window.__m = {
     range.selectNodeContents(el);
     return [...range.getClientRects()];
   },
-  chips() { return [...document.querySelectorAll("section button")].filter((b) => !b.closest('[role="group"]')); },
+  chips() { return [...document.querySelectorAll("[aria-labelledby=hero-title] button")].filter((b) => !b.closest('[role="group"]')); },
 };`;
 
 /** Hides text (not pills) so a screenshot shows what is behind it. */
 const HIDE_TEXT = `(() => {
   const s = document.createElement("style");
   s.id = "__hide";
-  s.textContent = "h1, h1 + p, section a { visibility: hidden !important } section button { color: transparent !important }";
+  s.textContent = "h1, h1 + p, [aria-labelledby=hero-title] a { visibility: hidden !important } [aria-labelledby=hero-title] button { color: transparent !important }";
   document.head.append(s);
 })()`;
 const SHOW_TEXT = `document.getElementById("__hide")?.remove()`;
@@ -275,7 +376,7 @@ const ANALYZE = String.raw`async (png, dpr) => {
 
   // Text on the pills. The screenshot has their text hidden, so this is the
   // pill's own fill (including whatever shows through it).
-  for (const b of document.querySelectorAll("section button")) {
+  for (const b of document.querySelectorAll("[aria-labelledby=hero-title] button")) {
     result.chipText[b.textContent.trim()] = stats(sampleText(b));
   }
 
@@ -347,7 +448,7 @@ const RING = String.raw`async (plainPng, focusedPng, dpr) => {
 const NIGHT_EDGES = String.raw`async (png, dpr) => {
   const img = await __m.decode(png);
   const { ratio, stats } = __m;
-  const hero = document.querySelector("section").getBoundingClientRect();
+  const hero = document.querySelector("[aria-labelledby=hero-title]").getBoundingClientRect();
   const W = hero.width, H = hero.height;
   const SW = W < 700 ? 220 : 360;
   const SH = Math.max(120, Math.round((SW * H) / W));
@@ -355,7 +456,7 @@ const NIGHT_EDGES = String.raw`async (png, dpr) => {
   const tall = SW / SH < 0.8;
   // Points under the controls or the text block measure those, not the
   // painting, so they are skipped (box returns NaN, filtered out below).
-  const covers = [...document.querySelectorAll('section button, [role="group"], h1, h1 + p, section a')]
+  const covers = [...document.querySelectorAll('[aria-labelledby=hero-title] button, [role="group"], h1, h1 + p, [aria-labelledby=hero-title] a')]
     .map((el) => el.getBoundingClientRect());
   const covered = (x, y) => covers.some((c) => x + hero.left > c.left - 8 && x + hero.left < c.right + 8 && y + hero.top > c.top - 8 && y + hero.top < c.bottom + 8);
   // Average luminance in a small box, to smooth over single brushstrokes.
@@ -403,14 +504,14 @@ const NIGHT_EDGES = String.raw`async (png, dpr) => {
 const LAYOUT = String.raw`(() => {
   const rect = (el) => el.getBoundingClientRect();
   const h1 = rect(document.querySelector("h1"));
-  const link = rect(document.querySelector("section a"));
-  const controls = [...document.querySelectorAll("section button, section a")];
-  const controlsBottom = Math.max(...[...document.querySelectorAll("section button")].map((b) => rect(b).bottom));
+  const link = rect(document.querySelector("[aria-labelledby=hero-title] a"));
+  const controls = [...document.querySelectorAll("[aria-labelledby=hero-title] button, [aria-labelledby=hero-title] a")];
+  const controlsBottom = Math.max(...[...document.querySelectorAll("[aria-labelledby=hero-title] button")].map((b) => rect(b).bottom));
   const small = controls
     .map((el) => ({ name: el.textContent.trim(), w: rect(el).width, h: rect(el).height }))
     .filter((c) => c.w < 44 || c.h < 44)
     .map((c) => c.name + " " + Math.round(c.w) + "x" + Math.round(c.h));
-  const hero = rect(document.querySelector("section"));
+  const hero = rect(document.querySelector("[aria-labelledby=hero-title]"));
   // Every visible link and button on the page (header, hero, footer). The
   // skip link is left out while it's hidden (1x1 until focused).
   const pageSmall = [...document.querySelectorAll("a, button")]
@@ -484,7 +585,7 @@ const INSTRUMENT = String.raw`
  */
 const SNAP = String.raw`(() => {
   let h = 2166136261;
-  for (const c of document.querySelectorAll("section canvas")) {
+  for (const c of document.querySelectorAll("[aria-labelledby=hero-title] canvas")) {
     const d = new Uint32Array(c.getContext("2d").getImageData(0, 0, c.width, c.height).data.buffer);
     for (let i = 0; i < d.length; i++) h = Math.imul(h ^ d[i], 16777619);
   }
@@ -513,13 +614,13 @@ const SHOT_DIFF = String.raw`async (a, b, dpr) => {
 
 /** Saves the paint canvas's pixels, so DIFF_BOX can compare against them later. */
 const SAVE_PAINT = String.raw`(() => {
-  const c = document.querySelector("section canvas");
+  const c = document.querySelector("[aria-labelledby=hero-title] canvas");
   window.__saved = c.getContext("2d").getImageData(0, 0, c.width, c.height).data.slice();
 })()`;
 
 /** Bounding box (device pixels) of every paint-canvas pixel that changed since SAVE_PAINT. */
 const DIFF_BOX = String.raw`(() => {
-  const c = document.querySelector("section canvas");
+  const c = document.querySelector("[aria-labelledby=hero-title] canvas");
   const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
   const s = window.__saved;
   let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1, n = 0;
@@ -563,7 +664,7 @@ const WAIT_FOR_SWAP = String.raw`(since, timeout) => new Promise((resolve) => {
 
 /** Share of the visible paint canvas still showing the bare Night underpaint. */
 const UNDERPAINT_SHARE = String.raw`(() => {
-  const c = document.querySelector("section canvas");
+  const c = document.querySelector("[aria-labelledby=hero-title] canvas");
   const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
   let n = 0;
   for (let i = 0; i < d.length; i += 4) {
@@ -574,7 +675,7 @@ const UNDERPAINT_SHARE = String.raw`(() => {
 
 /** Resolves on the first animation frame after the paint canvas changes size. */
 const WAIT_FOR_RESIZE = String.raw`(oldWidth) => new Promise((resolve) => {
-  const c = document.querySelector("section canvas");
+  const c = document.querySelector("[aria-labelledby=hero-title] canvas");
   const check = () => (c.width !== oldWidth ? resolve(c.width) : requestAnimationFrame(check));
   requestAnimationFrame(check);
 })`;
@@ -598,7 +699,7 @@ async function load(cdp) {
 
 async function clickButton(cdp, text) {
   await cdp.evaluate(
-    `[...document.querySelectorAll("section button")].find((b) => b.textContent.trim() === ${JSON.stringify(text)}).click()`,
+    `[...document.querySelectorAll("[aria-labelledby=hero-title] button")].find((b) => b.textContent.trim() === ${JSON.stringify(text)}).click()`,
   );
 }
 
@@ -621,6 +722,7 @@ async function measureModes(cdp, vp) {
   await sleep(3500);
   const result = { layout: await cdp.evaluate(LAYOUT) };
   for (const mode of MODES) {
+    note(`${mode.label}: text contrast`);
     await clickButton(cdp, mode.label);
     await sleep(mode.slug === "night" ? 1000 : 6000);
     let merged = null;
@@ -637,6 +739,7 @@ async function measureModes(cdp, vp) {
       }
       merged = merged ? worse(merged, measured) : measured;
     }
+    note(`${mode.label}: focus rings`);
     merged.ring = await measureRings(cdp, vp);
     result[mode.slug] = merged;
   }
@@ -673,7 +776,7 @@ async function measureRings(cdp, vp) {
   for (let i = 0; i < 20; i++) {
     await pressTab(cdp);
     const name = await cdp.evaluate(
-      `(() => { const el = document.activeElement; return el?.closest("section") && el.matches("button, a") ? el.textContent.trim() : null; })()`,
+      `(() => { const el = document.activeElement; return el?.closest("[aria-labelledby=hero-title]") && el.matches("button, a") ? el.textContent.trim() : null; })()`,
     );
     if (!name) {
       if (reached) break;
@@ -725,7 +828,7 @@ async function rotationTest(cdp, variant) {
     [portrait, { type: "portraitPrimary", angle: 0 }],
   ]) {
     const before = await cdp.evaluate(`window.__frames.splice(0)`);
-    const oldWidth = await cdp.evaluate(`document.querySelector("section canvas").width`);
+    const oldWidth = await cdp.evaluate(`document.querySelector("[aria-labelledby=hero-title] canvas").width`);
     await setViewport(cdp, vp, orientation);
     await cdp.evaluate(`(${WAIT_FOR_RESIZE})(${oldWidth})`);
     const underpaintRightAfter = await cdp.evaluate(UNDERPAINT_SHARE);
@@ -788,7 +891,7 @@ async function framesDuring(cdp, ms) {
 const now = (cdp) => cdp.evaluate(`performance.now()`);
 const visibleStrokes = (cdp) => cdp.evaluate(`window.__counts.visible`);
 const pausePressed = (cdp) =>
-  cdp.evaluate(`[...document.querySelectorAll("section button")].find((b) => b.textContent.trim() === "Pause motion").getAttribute("aria-pressed")`);
+  cdp.evaluate(`[...document.querySelectorAll("[aria-labelledby=hero-title] button")].find((b) => b.textContent.trim() === "Pause motion").getAttribute("aria-pressed")`);
 
 /**
  * Runs `action` while sampling the canvases, and reports what a paused
@@ -997,7 +1100,7 @@ async function stillTest(cdp) {
     await cdp.send("Page.navigate", { url: args.url });
     await sleep(1500);
     out.beforeHydration[on ? "reduced" : "noPreference"] = await cdp.evaluate(
-      `(() => { const b = [...document.querySelectorAll("section button")].find((x) => x.textContent.trim() === "Pause motion"); const s = getComputedStyle(b); return { background: s.backgroundColor, color: s.color, ariaPressed: b.getAttribute("aria-pressed") }; })()`,
+      `(() => { const b = [...document.querySelectorAll("[aria-labelledby=hero-title] button")].find((x) => x.textContent.trim() === "Pause motion"); const s = getComputedStyle(b); return { background: s.backgroundColor, color: s.color, ariaPressed: b.getAttribute("aria-pressed") }; })()`,
     );
     await screenshot(cdp, `${args.label}-still-no-js-${on ? "reduced" : "no-preference"}.png`);
   }
@@ -1053,7 +1156,56 @@ const LANDMARKS = String.raw`(() => ({
   main: document.querySelectorAll("main").length,
   footer: document.querySelectorAll("body > footer").length,
   contactTarget: !!document.getElementById("contact"),
+  collectionTarget: !!document.getElementById("collection"),
 }))()`;
+
+/**
+ * The Collection (#8): where it sits, its heading, and each card's name,
+ * kind, status, Medium label, and artwork label. Links and focusable
+ * elements are counted so a link to a page that doesn't exist yet shows
+ * up, and animations so anything that moves does.
+ */
+const COLLECTION = String.raw`(() => {
+  const section = document.getElementById("collection");
+  if (!section) return null;
+  const hero = "[aria-labelledby=hero-title]";
+  const cards = [...section.querySelectorAll("article")].map((a) => {
+    const ps = [...a.querySelectorAll("p")].map((p) => p.textContent.trim());
+    return {
+      title: a.querySelector("h3")?.textContent.trim() ?? null,
+      named: document.getElementById(a.getAttribute("aria-labelledby"))?.textContent.trim() ?? null,
+      kind: a.dataset.kind ?? null,
+      status: ps.find((t) => t.startsWith("Status:"))?.slice(7).trim() ?? null,
+      medium: ps.find((t) => t.startsWith("Medium"))?.split(":")[0] ?? null,
+      artworkLabeled: [...a.querySelectorAll("svg")].every((svg) => svg.getAttribute("role") === "img" && !!svg.getAttribute("aria-label")),
+    };
+  });
+  const r = section.getBoundingClientRect();
+  return {
+    heading: document.getElementById(section.getAttribute("aria-labelledby"))?.textContent.trim() ?? null,
+    afterHero: !!section.previousElementSibling?.matches(hero),
+    beforeFooter: !section.nextElementSibling && section.closest("main")?.nextElementSibling?.tagName === "FOOTER",
+    dividerAtTop: !!section.firstElementChild?.matches("div[aria-hidden=true]"),
+    cards,
+    links: [...section.querySelectorAll("a[href]")].map((a) => a.getAttribute("href")),
+    focusable: section.querySelectorAll("a[href], button, input, select, textarea, [tabindex]:not([tabindex='-1'])").length,
+    animations: section.getAnimations({ subtree: true }).length,
+    height: Math.round(r.height),
+    horizontalScroll: document.documentElement.scrollWidth > innerWidth,
+  };
+})()`;
+
+/** Whether the Collection report meets #8: placement, names, labels, studies for planned work, nothing moving. */
+function collectionOk(c) {
+  if (!c) return false;
+  return (
+    c.heading === "The Collection" && c.afterHero && c.beforeFooter && c.dividerAtTop &&
+    c.cards.length > 0 &&
+    c.cards.every((card) => card.title && card.named === card.title && card.status && card.medium && card.artworkLabeled) &&
+    c.cards.every((card) => !card.status.startsWith("Planned") || (card.kind === "study" && card.medium === "Medium (draft)")) &&
+    c.animations === 0 && !c.horizontalScroll
+  );
+}
 
 /** Mean color of the last pixel row of the hero and the first row below it, from a screenshot. */
 const SEAM = String.raw`async (shot, dpr) => {
@@ -1064,7 +1216,7 @@ const SEAM = String.raw`async (shot, dpr) => {
   c.width = img.width; c.height = img.height;
   const x = c.getContext("2d");
   x.drawImage(img, 0, 0);
-  const bottom = Math.round(document.querySelector("section").getBoundingClientRect().bottom * dpr);
+  const bottom = Math.round(document.querySelector("[aria-labelledby=hero-title]").getBoundingClientRect().bottom * dpr);
   const row = (y) => {
     const d = x.getImageData(0, Math.max(0, Math.min(c.height - 1, y)), c.width, 1).data;
     const m = [0, 0, 0];
@@ -1097,7 +1249,14 @@ async function pluckDivider(cdp) {
 /** Where the page is scrolled to, and whether the footer is on screen. */
 const SCROLL_STATE = String.raw`(() => {
   const f = document.querySelector("footer").getBoundingClientRect();
-  return { scrollY: Math.round(scrollY), atTop: scrollY < 1, footerOnScreen: f.top < innerHeight && f.bottom > 0, hash: location.hash };
+  const c = document.getElementById("collection")?.getBoundingClientRect();
+  return {
+    scrollY: Math.round(scrollY),
+    atTop: scrollY < 1,
+    footerOnScreen: f.top < innerHeight && f.bottom > 0,
+    collectionAtTop: !!c && Math.abs(c.top) < 2,
+    hash: location.hash,
+  };
 })()`;
 
 /** A real mouse click (or tap) on the first element matching `selector`. */
@@ -1116,10 +1275,12 @@ async function clickAt(cdp, selector) {
 /**
  * The header's links, clicked more than once, the way a visitor would:
  * Contact must reach the footer every time (even when the URL already ends
- * in #contact), and my name must go to the top of the home page every time.
+ * in #contact), Work must bring the Collection to the top of the screen
+ * every time, and my name must go to the top of the home page every time.
  */
 async function headerLinks(cdp) {
   const contact = `header nav a[href="/#contact"]`;
+  const work = `header nav a[href="/#collection"]`;
   const brand = `header a[href="/"]`;
   // The header isn't sticky, so scroll back up before each click, as a
   // visitor would. For my name only 20px, so the header is still on screen
@@ -1135,7 +1296,14 @@ async function headerLinks(cdp) {
   await scrollTo(20);
   out.brandAgain = await clickAt(cdp, brand);
   out.contactAfterBrand = await clickAt(cdp, contact);
+  await scrollTo(0);
+  out.workFirst = await clickAt(cdp, work);
+  await scrollTo(0);
+  out.workAgain = await clickAt(cdp, work);
+  await scrollTo(20);
+  out.brandAfterWork = await clickAt(cdp, brand);
   out.ok =
+    out.workFirst.collectionAtTop && out.workAgain.collectionAtTop && out.brandAfterWork.atTop &&
     out.contactFirst.footerOnScreen && out.contactAgain.footerOnScreen && out.contactAfterBrand.footerOnScreen &&
     out.brandAfterContact.atTop && out.brandAgain.atTop;
   return out;
@@ -1146,99 +1314,121 @@ async function pageTest(cdp) {
   for (const vp of VIEWPORTS.filter((v) => ["desktop", "phone", "narrow"].includes(v.name))) {
     process.stdout.write(`  ${vp.name}\n`);
     const r = (out[vp.name] = {});
-    await setReducedMotion(cdp, false);
-    await setViewport(cdp, vp);
-    await load(cdp);
-    await sleep(2000);
-    r.landmarks = await cdp.evaluate(LANDMARKS);
-    r.nav = await cdp.evaluate(NAV_STATE);
-    r.layout = await cdp.evaluate(LAYOUT);
-
-    // Screenshots: the first screen and the bottom of the page, in each mode.
-    if (vp.name !== "narrow") {
-      for (const mode of MODES) {
-        await clickButton(cdp, mode.label);
-        await sleep(mode.slug === "night" ? 500 : 5000);
-        await cdp.evaluate(`window.scrollTo(0, 0)`);
-        await sleep(200);
-        await screenshot(cdp, `${args.label}-page-${vp.name}-${mode.slug}-top.png`);
-        await cdp.evaluate(`window.scrollTo(0, document.documentElement.scrollHeight)`);
-        await sleep(300);
-        const shot = await screenshot(cdp, `${args.label}-page-${vp.name}-${mode.slug}-bottom.png`);
-        r[`seam-${mode.slug}`] = await cdp.evaluate(`(${SEAM})(${JSON.stringify(shot)}, ${vp.dpr})`);
-      }
-      await clickButton(cdp, "Night");
-      await cdp.evaluate(`window.scrollTo(0, 0)`);
-      await sleep(1500);
-    }
-
-    // Tab through the whole page from the top, with a screenshot of each stop.
-    await cdp.evaluate(`(() => { document.activeElement?.blur(); window.scrollTo(0, 0); })()`);
-    const order = [];
-    for (let i = 0; i < 30; i++) {
-      await pressTab(cdp);
-      await sleep(60);
-      const f = await cdp.evaluate(FOCUSED);
-      if (!f || (order.length && f.name === order[0].name && f.tag === order[0].tag)) break;
-      order.push(f);
-      if (vp.name !== "narrow") await screenshot(cdp, `${args.label}-tab-${vp.name}-${String(i + 1).padStart(2, "0")}.png`);
-    }
-    r.tabOrder = order;
-
-    // Skip link: the first stop, visible when focused, and Enter moves focus into main.
-    await cdp.evaluate(`(() => { document.activeElement?.blur(); window.scrollTo(0, 0); })()`);
-    await pressTab(cdp);
-    const skip = await cdp.evaluate(FOCUSED);
-    await pressKey(cdp, "Enter");
-    await sleep(200);
-    await pressTab(cdp);
-    const afterSkip = await cdp.evaluate(FOCUSED);
-    r.skipLink = { first: skip, nextAfterEnter: afterSkip };
-
-    // Contact and my name, clicked repeatedly (only while the links are inline).
-    if (!r.nav.menuButton) r.links = await headerLinks(cdp);
-
-    // The Menu fallback, when the links don't fit.
-    if (r.nav.menuButton) {
-      const m = (r.menu = {});
-      await cdp.evaluate(`document.querySelector("nav[aria-label=Main] button").focus()`);
-      await pressKey(cdp, "Enter");
-      await sleep(150);
-      m.afterEnter = await cdp.evaluate(NAV_STATE);
-      await screenshot(cdp, `${args.label}-menu-${vp.name}-open.png`);
-      await pressTab(cdp);
-      m.tabIntoPanel = await cdp.evaluate(`document.activeElement.closest("#site-menu") ? document.activeElement.textContent.trim() : null`);
-      await pressKey(cdp, "Escape");
-      await sleep(150);
-      m.afterEscape = await cdp.evaluate(NAV_STATE);
-      m.focusAfterEscape = await cdp.evaluate(FOCUSED);
-      await cdp.evaluate(`document.querySelector("nav[aria-label=Main] button").click()`);
-      await sleep(150);
-      const opened = await cdp.evaluate(NAV_STATE);
-      const outside = { x: Math.round(vp.width / 2), y: Math.round(vp.height * 0.7), button: "left", clickCount: 1 };
-      await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...outside });
-      await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...outside });
-      await sleep(150);
-      m.outsideClick = { before: opened.expanded, after: (await cdp.evaluate(NAV_STATE)).expanded };
-    }
-
-    // String divider: plucks with motion on; not with Pause motion or reduced
-    // motion. Hidden from the accessibility tree.
-    if (vp.name === "desktop") {
-      r.divider = { motionOn: await pluckDivider(cdp) };
-      await cdp.evaluate(`window.scrollTo(0, 0)`);
-      await clickButton(cdp, "Pause motion");
-      await sleep(300);
-      r.divider.pauseMotion = await pluckDivider(cdp);
-      await setReducedMotion(cdp, true);
-      await load(cdp);
-      r.divider.reducedMotion = await pluckDivider(cdp);
-      const { root } = await cdp.send("DOM.getDocument", { depth: 0 });
-      const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: "footer > div[aria-hidden] svg" });
-      const ax = await cdp.send("Accessibility.getPartialAXTree", { nodeId, fetchRelatives: false });
-      r.divider.inAccessibilityTree = !ax.nodes[0].ignored;
+    await step(`page ${vp.name}`, async () => {
       await setReducedMotion(cdp, false);
-    }
+      await setViewport(cdp, vp);
+      await load(cdp);
+      await sleep(2000);
+      r.landmarks = await cdp.evaluate(LANDMARKS);
+      r.nav = await cdp.evaluate(NAV_STATE);
+      r.layout = await cdp.evaluate(LAYOUT);
+      r.collection = await cdp.evaluate(COLLECTION);
+
+      // The Collection, screen by screen from its top.
+      note("Collection screenshots");
+      if (vp.name !== "narrow" && r.collection) {
+        const top = await cdp.evaluate(`Math.round(document.getElementById("collection").getBoundingClientRect().top + scrollY)`);
+        const screens = Math.ceil(r.collection.height / vp.height);
+        for (let i = 0; i < screens; i++) {
+          await cdp.evaluate(`window.scrollTo(0, ${top + i * vp.height})`);
+          await sleep(200);
+          await screenshot(cdp, `${args.label}-collection-${vp.name}-${i + 1}.png`);
+        }
+        await cdp.evaluate(`window.scrollTo(0, 0)`);
+      }
+
+      // Screenshots: the first screen and the bottom of the page, in each mode.
+      if (vp.name !== "narrow") {
+        for (const mode of MODES) {
+          note(`${mode.label}: top and bottom screenshots`);
+          await clickButton(cdp, mode.label);
+          await sleep(mode.slug === "night" ? 500 : 5000);
+          await cdp.evaluate(`window.scrollTo(0, 0)`);
+          await sleep(200);
+          await screenshot(cdp, `${args.label}-page-${vp.name}-${mode.slug}-top.png`);
+          await cdp.evaluate(`window.scrollTo(0, document.documentElement.scrollHeight)`);
+          await sleep(300);
+          const shot = await screenshot(cdp, `${args.label}-page-${vp.name}-${mode.slug}-bottom.png`);
+          r[`seam-${mode.slug}`] = await cdp.evaluate(`(${SEAM})(${JSON.stringify(shot)}, ${vp.dpr})`);
+        }
+        await clickButton(cdp, "Night");
+        await cdp.evaluate(`window.scrollTo(0, 0)`);
+        await sleep(1500);
+      }
+
+      // Tab through the whole page from the top, with a screenshot of each stop.
+      note("Tab-through");
+      await cdp.evaluate(`(() => { document.activeElement?.blur(); window.scrollTo(0, 0); })()`);
+      const order = [];
+      for (let i = 0; i < 30; i++) {
+        await pressTab(cdp);
+        await sleep(60);
+        const f = await cdp.evaluate(FOCUSED);
+        if (!f || (order.length && f.name === order[0].name && f.tag === order[0].tag)) break;
+        order.push(f);
+        if (vp.name !== "narrow") await screenshot(cdp, `${args.label}-tab-${vp.name}-${String(i + 1).padStart(2, "0")}.png`);
+      }
+      r.tabOrder = order;
+
+      // Skip link: the first stop, visible when focused, and Enter moves focus into main.
+      note("skip link");
+      await cdp.evaluate(`(() => { document.activeElement?.blur(); window.scrollTo(0, 0); })()`);
+      await pressTab(cdp);
+      const skip = await cdp.evaluate(FOCUSED);
+      await pressKey(cdp, "Enter");
+      await sleep(200);
+      await pressTab(cdp);
+      const afterSkip = await cdp.evaluate(FOCUSED);
+      r.skipLink = { first: skip, nextAfterEnter: afterSkip };
+
+      // Contact and my name, clicked repeatedly (only while the links are inline).
+      note("header links");
+      if (!r.nav.menuButton) r.links = await headerLinks(cdp);
+
+      // The Menu fallback, when the links don't fit.
+      note("Menu");
+      if (r.nav.menuButton) {
+        const m = (r.menu = {});
+        await cdp.evaluate(`document.querySelector("nav[aria-label=Main] button").focus()`);
+        await pressKey(cdp, "Enter");
+        await sleep(150);
+        m.afterEnter = await cdp.evaluate(NAV_STATE);
+        await screenshot(cdp, `${args.label}-menu-${vp.name}-open.png`);
+        await pressTab(cdp);
+        m.tabIntoPanel = await cdp.evaluate(`document.activeElement.closest("#site-menu") ? document.activeElement.textContent.trim() : null`);
+        await pressKey(cdp, "Escape");
+        await sleep(150);
+        m.afterEscape = await cdp.evaluate(NAV_STATE);
+        m.focusAfterEscape = await cdp.evaluate(FOCUSED);
+        await cdp.evaluate(`document.querySelector("nav[aria-label=Main] button").click()`);
+        await sleep(150);
+        const opened = await cdp.evaluate(NAV_STATE);
+        const outside = { x: Math.round(vp.width / 2), y: Math.round(vp.height * 0.7), button: "left", clickCount: 1 };
+        await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...outside });
+        await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...outside });
+        await sleep(150);
+        m.outsideClick = { before: opened.expanded, after: (await cdp.evaluate(NAV_STATE)).expanded };
+      }
+
+      note("string divider");
+      // String divider: plucks with motion on; not with Pause motion or reduced
+      // motion. Hidden from the accessibility tree.
+      if (vp.name === "desktop") {
+        r.divider = { motionOn: await pluckDivider(cdp) };
+        await cdp.evaluate(`window.scrollTo(0, 0)`);
+        await clickButton(cdp, "Pause motion");
+        await sleep(300);
+        r.divider.pauseMotion = await pluckDivider(cdp);
+        await setReducedMotion(cdp, true);
+        await load(cdp);
+        r.divider.reducedMotion = await pluckDivider(cdp);
+        const { root } = await cdp.send("DOM.getDocument", { depth: 0 });
+        const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: "footer > div[aria-hidden] svg" });
+        const ax = await cdp.send("Accessibility.getPartialAXTree", { nodeId, fetchRelatives: false });
+        r.divider.inAccessibilityTree = !ax.nodes[0].ignored;
+        await setReducedMotion(cdp, false);
+      }
+    });
   }
   return out;
 }
@@ -1309,11 +1499,16 @@ function summarize(report) {
       const seam = r[`seam-${mode.slug}`];
       if (seam) lines.push(`page ${vp}: hero bottom ${mode.slug} last row ${seam.heroLastRow} vs page ${seam.pageBelow} (max diff ${seam.maxChannelDiff})`);
     }
+    if (r.collection !== undefined) {
+      const ok = collectionOk(r.collection);
+      if (!ok) failures++;
+      lines.push(`page ${vp}: collection ${ok ? "ok" : "*"}  ${JSON.stringify(r.collection)}`);
+    }
     if (r.links) {
       if (!r.links.ok) failures++;
       const steps = Object.entries(r.links)
         .filter(([k]) => k !== "ok")
-        .map(([k, s]) => `${k} y=${s.scrollY}${s.hash}${s.footerOnScreen ? " footer" : ""}${s.atTop ? " top" : ""}`);
+        .map(([k, s]) => `${k} y=${s.scrollY}${s.hash}${s.footerOnScreen ? " footer" : ""}${s.collectionAtTop ? " collection" : ""}${s.atTop ? " top" : ""}`);
       lines.push(`page ${vp}: header links ${r.links.ok ? "ok" : "*"}  ${steps.join(", ")}`);
     }
     if (r.menu) lines.push(`page ${vp}: menu ${JSON.stringify(r.menu)}`);
@@ -1328,38 +1523,55 @@ const cdp = await connect();
 await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: INSTRUMENT });
 const only = args.only?.split(",");
 const report = { url: args.url, date: new Date().toISOString() };
+let failure = null;
 try {
   if (!args["no-modes"]) {
     report.modes = {};
     for (const vp of VIEWPORTS) {
       if (only && !only.includes(vp.name)) continue;
       process.stdout.write(`measuring ${vp.name}...\n`);
-      report.modes[vp.name] = await measureModes(cdp, vp);
+      report.modes[vp.name] = await step(`contrast ${vp.name}`, () => measureModes(cdp, vp));
     }
   }
   if (args.rotation) {
     report.rotation = {};
     for (const variant of ["running", "paused", "reduced"]) {
       process.stdout.write(`rotation (${variant})...\n`);
-      report.rotation[variant] = await rotationTest(cdp, variant);
+      report.rotation[variant] = await step(`rotation ${variant}`, () => rotationTest(cdp, variant));
     }
   }
   if (args.perf) {
     process.stdout.write("performance...\n");
-    report.perf = await perfTest(cdp);
+    report.perf = await step("performance", () => perfTest(cdp));
   }
   if (args.still) {
     process.stdout.write("still frames...\n");
-    report.still = await stillTest(cdp);
+    report.still = await step("still frames", () => stillTest(cdp));
   }
   if (args.page) {
     process.stdout.write("page layout...\n");
     report.page = await pageTest(cdp);
   }
+} catch (error) {
+  failure = error;
 } finally {
   cdp.close();
 }
+report.timing = timing;
+if (failure) {
+  // Keep what was measured before the failure, for working out what went wrong.
+  report.error = failure.message;
+  writeFileSync(join(OUT_DIR, `${args.label}-report.json`), JSON.stringify(report, null, 1));
+  console.error(`\n${failure.message}`);
+  console.error(`What was measured before that is in ${OUT_DIR}/${args.label}-report.json.`);
+  process.exit(1);
+}
 writeFileSync(join(OUT_DIR, `${args.label}-report.json`), JSON.stringify(report, null, 1));
 console.log(summarize(report));
+const slowestStep = Object.entries(timing.steps).sort((a, b) => b[1] - a[1])[0];
+console.log(
+  `Timing: slowest step "${slowestStep[0]}" ${(slowestStep[1] / 1000).toFixed(1)} s (limit ${STEP_TIMEOUT_MS / 1000} s); ` +
+    `slowest command ${timing.slowestCommand.method} ${timing.slowestCommand.ms} ms during ${timing.slowestCommand.during} (limit ${COMMAND_TIMEOUT_MS / 1000} s).`,
+);
 console.log(`\nScreenshots and ${args.label}-report.json are in ${OUT_DIR}/`);
 process.exit(0);
