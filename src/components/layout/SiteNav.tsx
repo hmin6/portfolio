@@ -139,7 +139,8 @@ export default function SiteNav({ items }: { items: readonly NavItem[] }) {
     ));
 
   return (
-    <div className="flex h-(--header-h) items-center gap-4 px-[clamp(16px,4vw,48px)]">
+    // page-container (globals.css): the same column as the Collection and footer.
+    <div className="page-container flex h-(--header-h) items-center gap-4">
       <Link
         href="/"
         aria-current={pathname === "/" ? "page" : undefined}

@@ -17,28 +17,51 @@ Personal portfolio for backend (Spring Boot/PostgreSQL) and data science roles.
 - Palette: night #0B1026, panel #1A2147, aurora green #3DFFB0, teal #2DD4BF,
   violet #8B5CF6 (decorative only, not text), magenta #E879F9 (sparing),
   starlight text #E8ECF8, brass accent #E0B66A
-- Projects shown as framed paintings in "The Collection," each with a
-  "Medium:" placard listing the tech stack and a "liner notes" case study page
+- Projects shown in "The Collection": in-progress and finished projects as framed
+  paintings, each with a "Medium:" placard listing the tech stack and a "liner notes"
+  case study page; planned projects as "studies" (sketch-like cards, visually distinct
+  from the paintings), each labeled "Planned" with a draft Medium placard
 - String dividers: thin brass (#E0B66A) SVG lines between sections, slightly wavy like a
   guitar string at rest; on hover they briefly vibrate like a plucked string, then settle.
   Decorative only (aria-hidden), and still with prefers-reduced-motion
 - Motion is slow and calm; everything respects prefers-reduced-motion
 
 ## Projects
-Featured (in progress). These are the only projects shown on the site:
-- Aurora: a probabilistic aurora/space-weather forecaster. It publishes calibrated
-  probabilities, records every forecast in an append-only ledger before outcomes are
-  known, and scores itself against NOAA's forecasts. Python (statistics/ML), Spring Boot,
-  PostgreSQL, GitHub Actions. Its live forecast will later drive the aurora in the hero.
-- Pigment: search and recolor paintings by their full color distributions (Gaussian
-  mixtures, optimal transport), using museum open-access collections. Python, Spring Boot,
-  PostgreSQL + pgvector, Redis, TypeScript.
-- Ensemble: lets musicians in different places record parts that line up to the sample,
-  using clock sync and device latency calibration. Spring Boot (WebSocket), PostgreSQL,
-  Redis, Web Audio API, TypeScript.
+Three solo projects, built in layers. These are the only projects shown on the site;
+hackathon projects are not shown.
 
-Projects are built in layers. Each project page shows its current status and a changelog.
-Never present unbuilt features as finished. Hackathon projects are not shown on the site.
+- Aurora (in progress): tells people anywhere in the world whether tonight is worth
+  going out to see the aurora, and publicly proves how often it's right. It keeps a
+  public, tamper-evident (hash-chained) forecast ledger scored against NOAA and GFZ,
+  and grades visibility against what all-sky cameras actually saw. Features: a Tonight
+  verdict for any location, push alerts, track record, the ledger, science findings, a
+  public API, and later a live 3D globe. It has its own site on a vercel.app address;
+  the portfolio links to it.
+  Draft Medium: Python, LightGBM, PyTorch, statsmodels, lifelines, Spring Boot,
+  PostgreSQL, Next.js, three.js, GitHub Actions.
+- Woodshed (planned, after Aurora): a practice coach for guitar and voice that says what
+  to practice today, predicts what you're about to forget, and runs experiments on how
+  you learn best. It grades from measured playing instead of self-ratings, makes
+  calibrated forgetting predictions, and runs personal randomized (n-of-1) experiments
+  on practice strategies.
+  Draft Medium: TypeScript, Web Audio API, Python, Spring Boot, PostgreSQL.
+- Pigment (planned, after Woodshed): a paint-mixing coach. Photograph a reference scene,
+  get a palette and mixing recipes, then photograph test swatches so it learns how your
+  own paint tubes actually behave. It predicts each mix with an error estimate, measures
+  the real result, and improves.
+  Draft Medium: Python, NumPy/SciPy, OpenCV, Spring Boot, PostgreSQL, Next.js.
+
+Shared identity: every project measures what actually happens, predicts with honest
+probabilities, scores its own predictions, and learns from the results.
+Product standard for every project: who uses it, what it helps with, why they should
+trust it, and what it does that existing tools don't.
+
+Collection: in-progress and finished projects are framed paintings; planned projects
+are "studies," visually distinct and labeled "Planned." Never present unbuilt features
+as finished. Each project page shows its current status and a changelog.
+
+Portfolio tie-ins (later): Aurora's live Kp and forecast drive the Night hero's aurora
+intensity; Aurora's 3D globe may share shader and color code with the hero.
 
 ## Git workflow
 - Every task starts from a GitHub issue. Read it with `gh issue view <number>`.

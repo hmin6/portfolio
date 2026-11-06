@@ -117,7 +117,7 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
       data-mode={mode}
       data-paused={paused ? "" : undefined}
       onClick={handleHeroClick}
-      className="group/hero relative flex min-h-[min(calc(100svh_-_var(--header-h)),1100px)] flex-col justify-between gap-8 overflow-hidden bg-deep px-[clamp(16px,4vw,48px)] pt-[clamp(16px,3vh,28px)] pb-(--hero-pb) text-starlight"
+      className="group/hero relative flex min-h-[min(calc(100svh_-_var(--header-h)),1100px)] flex-col justify-between gap-8 overflow-hidden bg-deep px-(--page-gutter) pt-[clamp(16px,3vh,28px)] pb-(--hero-pb) text-starlight"
     >
       <canvas ref={paintRef} role="img" aria-label={description} className="absolute inset-0 block size-full" />
       <canvas
