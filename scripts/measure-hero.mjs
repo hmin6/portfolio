@@ -66,6 +66,11 @@ const { values: args } = parseArgs({
 });
 
 const OUT_DIR = "hero-measurements";
+/*
+ * The page has more than one <section> (the hero, then the Collection), so
+ * every hero measurement finds the hero by its label, written in the browser
+ * as [aria-labelledby=hero-title], never as a bare "section".
+ */
 const PORT = 9333;
 
 /** Pass bars (ADR-007). */
@@ -220,14 +225,14 @@ window.__m = {
     range.selectNodeContents(el);
     return [...range.getClientRects()];
   },
-  chips() { return [...document.querySelectorAll("section button")].filter((b) => !b.closest('[role="group"]')); },
+  chips() { return [...document.querySelectorAll("[aria-labelledby=hero-title] button")].filter((b) => !b.closest('[role="group"]')); },
 };`;
 
 /** Hides text (not pills) so a screenshot shows what is behind it. */
 const HIDE_TEXT = `(() => {
   const s = document.createElement("style");
   s.id = "__hide";
-  s.textContent = "h1, h1 + p, section a { visibility: hidden !important } section button { color: transparent !important }";
+  s.textContent = "h1, h1 + p, [aria-labelledby=hero-title] a { visibility: hidden !important } [aria-labelledby=hero-title] button { color: transparent !important }";
   document.head.append(s);
 })()`;
 const SHOW_TEXT = `document.getElementById("__hide")?.remove()`;
@@ -275,7 +280,7 @@ const ANALYZE = String.raw`async (png, dpr) => {
 
   // Text on the pills. The screenshot has their text hidden, so this is the
   // pill's own fill (including whatever shows through it).
-  for (const b of document.querySelectorAll("section button")) {
+  for (const b of document.querySelectorAll("[aria-labelledby=hero-title] button")) {
     result.chipText[b.textContent.trim()] = stats(sampleText(b));
   }
 
@@ -347,7 +352,7 @@ const RING = String.raw`async (plainPng, focusedPng, dpr) => {
 const NIGHT_EDGES = String.raw`async (png, dpr) => {
   const img = await __m.decode(png);
   const { ratio, stats } = __m;
-  const hero = document.querySelector("section").getBoundingClientRect();
+  const hero = document.querySelector("[aria-labelledby=hero-title]").getBoundingClientRect();
   const W = hero.width, H = hero.height;
   const SW = W < 700 ? 220 : 360;
   const SH = Math.max(120, Math.round((SW * H) / W));
@@ -355,7 +360,7 @@ const NIGHT_EDGES = String.raw`async (png, dpr) => {
   const tall = SW / SH < 0.8;
   // Points under the controls or the text block measure those, not the
   // painting, so they are skipped (box returns NaN, filtered out below).
-  const covers = [...document.querySelectorAll('section button, [role="group"], h1, h1 + p, section a')]
+  const covers = [...document.querySelectorAll('[aria-labelledby=hero-title] button, [role="group"], h1, h1 + p, [aria-labelledby=hero-title] a')]
     .map((el) => el.getBoundingClientRect());
   const covered = (x, y) => covers.some((c) => x + hero.left > c.left - 8 && x + hero.left < c.right + 8 && y + hero.top > c.top - 8 && y + hero.top < c.bottom + 8);
   // Average luminance in a small box, to smooth over single brushstrokes.
@@ -403,14 +408,14 @@ const NIGHT_EDGES = String.raw`async (png, dpr) => {
 const LAYOUT = String.raw`(() => {
   const rect = (el) => el.getBoundingClientRect();
   const h1 = rect(document.querySelector("h1"));
-  const link = rect(document.querySelector("section a"));
-  const controls = [...document.querySelectorAll("section button, section a")];
-  const controlsBottom = Math.max(...[...document.querySelectorAll("section button")].map((b) => rect(b).bottom));
+  const link = rect(document.querySelector("[aria-labelledby=hero-title] a"));
+  const controls = [...document.querySelectorAll("[aria-labelledby=hero-title] button, [aria-labelledby=hero-title] a")];
+  const controlsBottom = Math.max(...[...document.querySelectorAll("[aria-labelledby=hero-title] button")].map((b) => rect(b).bottom));
   const small = controls
     .map((el) => ({ name: el.textContent.trim(), w: rect(el).width, h: rect(el).height }))
     .filter((c) => c.w < 44 || c.h < 44)
     .map((c) => c.name + " " + Math.round(c.w) + "x" + Math.round(c.h));
-  const hero = rect(document.querySelector("section"));
+  const hero = rect(document.querySelector("[aria-labelledby=hero-title]"));
   // Every visible link and button on the page (header, hero, footer). The
   // skip link is left out while it's hidden (1x1 until focused).
   const pageSmall = [...document.querySelectorAll("a, button")]
@@ -484,7 +489,7 @@ const INSTRUMENT = String.raw`
  */
 const SNAP = String.raw`(() => {
   let h = 2166136261;
-  for (const c of document.querySelectorAll("section canvas")) {
+  for (const c of document.querySelectorAll("[aria-labelledby=hero-title] canvas")) {
     const d = new Uint32Array(c.getContext("2d").getImageData(0, 0, c.width, c.height).data.buffer);
     for (let i = 0; i < d.length; i++) h = Math.imul(h ^ d[i], 16777619);
   }
@@ -513,13 +518,13 @@ const SHOT_DIFF = String.raw`async (a, b, dpr) => {
 
 /** Saves the paint canvas's pixels, so DIFF_BOX can compare against them later. */
 const SAVE_PAINT = String.raw`(() => {
-  const c = document.querySelector("section canvas");
+  const c = document.querySelector("[aria-labelledby=hero-title] canvas");
   window.__saved = c.getContext("2d").getImageData(0, 0, c.width, c.height).data.slice();
 })()`;
 
 /** Bounding box (device pixels) of every paint-canvas pixel that changed since SAVE_PAINT. */
 const DIFF_BOX = String.raw`(() => {
-  const c = document.querySelector("section canvas");
+  const c = document.querySelector("[aria-labelledby=hero-title] canvas");
   const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
   const s = window.__saved;
   let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1, n = 0;
@@ -563,7 +568,7 @@ const WAIT_FOR_SWAP = String.raw`(since, timeout) => new Promise((resolve) => {
 
 /** Share of the visible paint canvas still showing the bare Night underpaint. */
 const UNDERPAINT_SHARE = String.raw`(() => {
-  const c = document.querySelector("section canvas");
+  const c = document.querySelector("[aria-labelledby=hero-title] canvas");
   const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
   let n = 0;
   for (let i = 0; i < d.length; i += 4) {
@@ -574,7 +579,7 @@ const UNDERPAINT_SHARE = String.raw`(() => {
 
 /** Resolves on the first animation frame after the paint canvas changes size. */
 const WAIT_FOR_RESIZE = String.raw`(oldWidth) => new Promise((resolve) => {
-  const c = document.querySelector("section canvas");
+  const c = document.querySelector("[aria-labelledby=hero-title] canvas");
   const check = () => (c.width !== oldWidth ? resolve(c.width) : requestAnimationFrame(check));
   requestAnimationFrame(check);
 })`;
@@ -598,7 +603,7 @@ async function load(cdp) {
 
 async function clickButton(cdp, text) {
   await cdp.evaluate(
-    `[...document.querySelectorAll("section button")].find((b) => b.textContent.trim() === ${JSON.stringify(text)}).click()`,
+    `[...document.querySelectorAll("[aria-labelledby=hero-title] button")].find((b) => b.textContent.trim() === ${JSON.stringify(text)}).click()`,
   );
 }
 
@@ -673,7 +678,7 @@ async function measureRings(cdp, vp) {
   for (let i = 0; i < 20; i++) {
     await pressTab(cdp);
     const name = await cdp.evaluate(
-      `(() => { const el = document.activeElement; return el?.closest("section") && el.matches("button, a") ? el.textContent.trim() : null; })()`,
+      `(() => { const el = document.activeElement; return el?.closest("[aria-labelledby=hero-title]") && el.matches("button, a") ? el.textContent.trim() : null; })()`,
     );
     if (!name) {
       if (reached) break;
@@ -725,7 +730,7 @@ async function rotationTest(cdp, variant) {
     [portrait, { type: "portraitPrimary", angle: 0 }],
   ]) {
     const before = await cdp.evaluate(`window.__frames.splice(0)`);
-    const oldWidth = await cdp.evaluate(`document.querySelector("section canvas").width`);
+    const oldWidth = await cdp.evaluate(`document.querySelector("[aria-labelledby=hero-title] canvas").width`);
     await setViewport(cdp, vp, orientation);
     await cdp.evaluate(`(${WAIT_FOR_RESIZE})(${oldWidth})`);
     const underpaintRightAfter = await cdp.evaluate(UNDERPAINT_SHARE);
@@ -788,7 +793,7 @@ async function framesDuring(cdp, ms) {
 const now = (cdp) => cdp.evaluate(`performance.now()`);
 const visibleStrokes = (cdp) => cdp.evaluate(`window.__counts.visible`);
 const pausePressed = (cdp) =>
-  cdp.evaluate(`[...document.querySelectorAll("section button")].find((b) => b.textContent.trim() === "Pause motion").getAttribute("aria-pressed")`);
+  cdp.evaluate(`[...document.querySelectorAll("[aria-labelledby=hero-title] button")].find((b) => b.textContent.trim() === "Pause motion").getAttribute("aria-pressed")`);
 
 /**
  * Runs `action` while sampling the canvases, and reports what a paused
@@ -997,7 +1002,7 @@ async function stillTest(cdp) {
     await cdp.send("Page.navigate", { url: args.url });
     await sleep(1500);
     out.beforeHydration[on ? "reduced" : "noPreference"] = await cdp.evaluate(
-      `(() => { const b = [...document.querySelectorAll("section button")].find((x) => x.textContent.trim() === "Pause motion"); const s = getComputedStyle(b); return { background: s.backgroundColor, color: s.color, ariaPressed: b.getAttribute("aria-pressed") }; })()`,
+      `(() => { const b = [...document.querySelectorAll("[aria-labelledby=hero-title] button")].find((x) => x.textContent.trim() === "Pause motion"); const s = getComputedStyle(b); return { background: s.backgroundColor, color: s.color, ariaPressed: b.getAttribute("aria-pressed") }; })()`,
     );
     await screenshot(cdp, `${args.label}-still-no-js-${on ? "reduced" : "no-preference"}.png`);
   }
@@ -1064,7 +1069,7 @@ const SEAM = String.raw`async (shot, dpr) => {
   c.width = img.width; c.height = img.height;
   const x = c.getContext("2d");
   x.drawImage(img, 0, 0);
-  const bottom = Math.round(document.querySelector("section").getBoundingClientRect().bottom * dpr);
+  const bottom = Math.round(document.querySelector("[aria-labelledby=hero-title]").getBoundingClientRect().bottom * dpr);
   const row = (y) => {
     const d = x.getImageData(0, Math.max(0, Math.min(c.height - 1, y)), c.width, 1).data;
     const m = [0, 0, 0];
