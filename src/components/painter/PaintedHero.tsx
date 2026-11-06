@@ -222,10 +222,16 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
           between modes over about the time the painting takes to blend.
           While paused, the painting changes mode all at once, so the scrim
           does too. ADR-007 has the measurements behind these values.
+
+          Wider than 1440px, the wide-screen scrim utility in globals.css
+          extends the left side of the scrim to the hero's left edge, so it
+          reads as shade from the side as it does at 1440px, not as an
+          oval. (Tailwind picks up class names even in comments, which is
+          why it isn't named here.)
         */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute -inset-x-[40%] -inset-y-36 -z-10 bg-[radial-gradient(closest-side,var(--color-deep)_55%,rgb(5_8_26/0.5)_78%,transparent)] opacity-60 transition-opacity duration-1000 group-data-[mode=day]/hero:opacity-80 group-data-paused/hero:transition-none motion-reduce:transition-none"
+          className="pointer-events-none absolute -inset-x-[40%] -inset-y-36 -z-10 bg-[radial-gradient(closest-side,var(--color-deep)_55%,rgb(5_8_26/0.5)_78%,transparent)] min-[1441px]:hero-scrim-wide opacity-60 transition-opacity duration-1000 group-data-[mode=day]/hero:opacity-80 group-data-paused/hero:transition-none motion-reduce:transition-none"
         />
         {children}
       </div>
