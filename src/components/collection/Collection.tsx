@@ -79,7 +79,7 @@ function Painting({ project }: { project: Project }) {
     <article
       aria-labelledby={titleId}
       data-kind="painting"
-      className="flex flex-col gap-6 lg:grid lg:grid-cols-12 lg:items-center lg:gap-12"
+      className="flex flex-col gap-6 lg:grid lg:grid-cols-12 lg:items-end lg:gap-12"
     >
       {/*
         The frame is three nested boxes: a dark `deep` moulding edged with
@@ -94,7 +94,11 @@ function Painting({ project }: { project: Project }) {
         </div>
       </div>
 
-      {/* The placard, like the label beside a painting in a museum: below it on phones, beside it on wide screens. */}
+      {/*
+        The placard, like the label beside a painting in a museum: below it
+        on phones; on wide screens beside it, its bottom edge level with the
+        frame's (lg:items-end on the article).
+      */}
       <div className="flex flex-col gap-3 rounded-sm bg-panel p-5 ring-1 ring-brass/60 sm:p-6 lg:col-span-5">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <h3 id={titleId} className="text-[clamp(24px,2.6vw,30px)] leading-tight">
