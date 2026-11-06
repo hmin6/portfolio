@@ -99,6 +99,66 @@ const MODES = [
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/*
+ * Timeouts, so a stuck run fails with a message instead of hanging. A run
+ * during #8 sat for over two hours on one step.
+ *
+ * Every wait in this script is either sleep() (which always ends) or a
+ * DevTools command waiting for the browser's answer, so a hang means a
+ * command that never got one. Two limits:
+ *
+ * - COMMAND_TIMEOUT_MS, 30 s, for each command. The longest a command is
+ *   meant to take is 15 s: WAIT_FOR_SWAP waits up to 15 s in the page for a
+ *   still frame. Measured with every option on (#8), the slowest command
+ *   took 2.2 s (a phone screenshot, and an evaluate in the still checks).
+ *   30 s is twice the designed maximum, so a slower machine doesn't trip
+ *   it, and a real hang fails within half a minute instead of hours.
+ * - STEP_TIMEOUT_MS, 5 minutes, for each step (one viewport's contrast
+ *   pass, one viewport's page checks, the still-frame checks, ...). A
+ *   backstop for a step that keeps getting answers but never finishes, for
+ *   example a loop waiting for something that never happens. Measured, the
+ *   slowest step took 116 s ("contrast phone"); the others took 13–107 s.
+ *   5 minutes is about 2.5 times the slowest, room for a slower machine.
+ *   It doesn't need to be tight: a stuck command is caught at 30 s.
+ *
+ * A timeout names the step (and the part of it) that was running, writes
+ * what was measured so far to the report, and exits with code 1. Each
+ * step's duration and the slowest command are in the report under
+ * `timing`, so the limits can be checked against real runs.
+ */
+const COMMAND_TIMEOUT_MS = 30_000;
+const STEP_TIMEOUT_MS = 300_000;
+/** For opening the connection to the browser. */
+const CONNECT_TIMEOUT_MS = 10_000;
+
+/** The step running now, and which part of it, for timeout messages. */
+const where = { step: "starting the browser", detail: "" };
+const describeWhere = () => `step "${where.step}"${where.detail ? ` (${where.detail})` : ""}`;
+/** Sets which part of the current step is running. */
+const note = (detail) => {
+  where.detail = detail;
+};
+
+/** How long each step took, and the slowest single command, in ms. */
+const timing = { steps: {}, slowestCommand: null };
+
+/** Runs one step, failing it if it takes longer than `budget` ms. */
+async function step(name, fn, budget = STEP_TIMEOUT_MS) {
+  where.step = name;
+  where.detail = "";
+  const started = performance.now();
+  let timer;
+  const overBudget = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timed out: ${describeWhere()} took longer than ${budget / 1000} s.`)), budget);
+  });
+  try {
+    return await Promise.race([fn(), overBudget]);
+  } finally {
+    clearTimeout(timer);
+    timing.steps[name] = Math.round(performance.now() - started);
+  }
+}
+
 function findBrowser() {
   const candidates = [
     process.env.BROWSER_PATH,
@@ -142,7 +202,13 @@ async function connect() {
   if (!wsUrl) throw new Error("The browser didn't open a debugging port.");
 
   const ws = new WebSocket(wsUrl);
-  await new Promise((resolve) => ws.addEventListener("open", resolve));
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Timed out: the browser's debugging connection didn't open within ${CONNECT_TIMEOUT_MS / 1000} s.`)), CONNECT_TIMEOUT_MS);
+    ws.addEventListener("open", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
   let nextId = 1;
   const pending = new Map();
   ws.addEventListener("message", (event) => {
@@ -153,11 +219,39 @@ async function connect() {
     if (msg.error) waiter.reject(new Error(msg.error.message));
     else waiter.resolve(msg.result);
   });
+  // If the browser crashes or closes, fail every waiting command now
+  // instead of letting each one run out its timeout.
+  ws.addEventListener("close", () => {
+    for (const waiter of pending.values()) waiter.reject(new Error(`The browser connection closed during ${describeWhere()}.`));
+    pending.clear();
+  });
 
+  /**
+   * Sends a DevTools command and waits for the answer, for at most
+   * COMMAND_TIMEOUT_MS. Also records the slowest command of the run.
+   */
   const send = (method, params = {}) =>
     new Promise((resolve, reject) => {
       const id = nextId++;
-      pending.set(id, { resolve, reject });
+      const started = performance.now();
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`Timed out: ${method} got no answer from the browser within ${COMMAND_TIMEOUT_MS / 1000} s, during ${describeWhere()}.`));
+      }, COMMAND_TIMEOUT_MS);
+      pending.set(id, {
+        resolve: (result) => {
+          clearTimeout(timer);
+          const ms = Math.round(performance.now() - started);
+          if (!timing.slowestCommand || ms > timing.slowestCommand.ms) {
+            timing.slowestCommand = { method, ms, during: describeWhere() };
+          }
+          resolve(result);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
       ws.send(JSON.stringify({ id, method, params }));
     });
   const evaluate = async (expression) => {
@@ -628,6 +722,7 @@ async function measureModes(cdp, vp) {
   await sleep(3500);
   const result = { layout: await cdp.evaluate(LAYOUT) };
   for (const mode of MODES) {
+    note(`${mode.label}: text contrast`);
     await clickButton(cdp, mode.label);
     await sleep(mode.slug === "night" ? 1000 : 6000);
     let merged = null;
@@ -644,6 +739,7 @@ async function measureModes(cdp, vp) {
       }
       merged = merged ? worse(merged, measured) : measured;
     }
+    note(`${mode.label}: focus rings`);
     merged.ring = await measureRings(cdp, vp);
     result[mode.slug] = merged;
   }
@@ -1218,112 +1314,121 @@ async function pageTest(cdp) {
   for (const vp of VIEWPORTS.filter((v) => ["desktop", "phone", "narrow"].includes(v.name))) {
     process.stdout.write(`  ${vp.name}\n`);
     const r = (out[vp.name] = {});
-    await setReducedMotion(cdp, false);
-    await setViewport(cdp, vp);
-    await load(cdp);
-    await sleep(2000);
-    r.landmarks = await cdp.evaluate(LANDMARKS);
-    r.nav = await cdp.evaluate(NAV_STATE);
-    r.layout = await cdp.evaluate(LAYOUT);
-    r.collection = await cdp.evaluate(COLLECTION);
-
-    // The Collection, screen by screen from its top.
-    if (vp.name !== "narrow" && r.collection) {
-      const top = await cdp.evaluate(`Math.round(document.getElementById("collection").getBoundingClientRect().top + scrollY)`);
-      const screens = Math.ceil(r.collection.height / vp.height);
-      for (let i = 0; i < screens; i++) {
-        await cdp.evaluate(`window.scrollTo(0, ${top + i * vp.height})`);
-        await sleep(200);
-        await screenshot(cdp, `${args.label}-collection-${vp.name}-${i + 1}.png`);
-      }
-      await cdp.evaluate(`window.scrollTo(0, 0)`);
-    }
-
-    // Screenshots: the first screen and the bottom of the page, in each mode.
-    if (vp.name !== "narrow") {
-      for (const mode of MODES) {
-        await clickButton(cdp, mode.label);
-        await sleep(mode.slug === "night" ? 500 : 5000);
-        await cdp.evaluate(`window.scrollTo(0, 0)`);
-        await sleep(200);
-        await screenshot(cdp, `${args.label}-page-${vp.name}-${mode.slug}-top.png`);
-        await cdp.evaluate(`window.scrollTo(0, document.documentElement.scrollHeight)`);
-        await sleep(300);
-        const shot = await screenshot(cdp, `${args.label}-page-${vp.name}-${mode.slug}-bottom.png`);
-        r[`seam-${mode.slug}`] = await cdp.evaluate(`(${SEAM})(${JSON.stringify(shot)}, ${vp.dpr})`);
-      }
-      await clickButton(cdp, "Night");
-      await cdp.evaluate(`window.scrollTo(0, 0)`);
-      await sleep(1500);
-    }
-
-    // Tab through the whole page from the top, with a screenshot of each stop.
-    await cdp.evaluate(`(() => { document.activeElement?.blur(); window.scrollTo(0, 0); })()`);
-    const order = [];
-    for (let i = 0; i < 30; i++) {
-      await pressTab(cdp);
-      await sleep(60);
-      const f = await cdp.evaluate(FOCUSED);
-      if (!f || (order.length && f.name === order[0].name && f.tag === order[0].tag)) break;
-      order.push(f);
-      if (vp.name !== "narrow") await screenshot(cdp, `${args.label}-tab-${vp.name}-${String(i + 1).padStart(2, "0")}.png`);
-    }
-    r.tabOrder = order;
-
-    // Skip link: the first stop, visible when focused, and Enter moves focus into main.
-    await cdp.evaluate(`(() => { document.activeElement?.blur(); window.scrollTo(0, 0); })()`);
-    await pressTab(cdp);
-    const skip = await cdp.evaluate(FOCUSED);
-    await pressKey(cdp, "Enter");
-    await sleep(200);
-    await pressTab(cdp);
-    const afterSkip = await cdp.evaluate(FOCUSED);
-    r.skipLink = { first: skip, nextAfterEnter: afterSkip };
-
-    // Contact and my name, clicked repeatedly (only while the links are inline).
-    if (!r.nav.menuButton) r.links = await headerLinks(cdp);
-
-    // The Menu fallback, when the links don't fit.
-    if (r.nav.menuButton) {
-      const m = (r.menu = {});
-      await cdp.evaluate(`document.querySelector("nav[aria-label=Main] button").focus()`);
-      await pressKey(cdp, "Enter");
-      await sleep(150);
-      m.afterEnter = await cdp.evaluate(NAV_STATE);
-      await screenshot(cdp, `${args.label}-menu-${vp.name}-open.png`);
-      await pressTab(cdp);
-      m.tabIntoPanel = await cdp.evaluate(`document.activeElement.closest("#site-menu") ? document.activeElement.textContent.trim() : null`);
-      await pressKey(cdp, "Escape");
-      await sleep(150);
-      m.afterEscape = await cdp.evaluate(NAV_STATE);
-      m.focusAfterEscape = await cdp.evaluate(FOCUSED);
-      await cdp.evaluate(`document.querySelector("nav[aria-label=Main] button").click()`);
-      await sleep(150);
-      const opened = await cdp.evaluate(NAV_STATE);
-      const outside = { x: Math.round(vp.width / 2), y: Math.round(vp.height * 0.7), button: "left", clickCount: 1 };
-      await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...outside });
-      await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...outside });
-      await sleep(150);
-      m.outsideClick = { before: opened.expanded, after: (await cdp.evaluate(NAV_STATE)).expanded };
-    }
-
-    // String divider: plucks with motion on; not with Pause motion or reduced
-    // motion. Hidden from the accessibility tree.
-    if (vp.name === "desktop") {
-      r.divider = { motionOn: await pluckDivider(cdp) };
-      await cdp.evaluate(`window.scrollTo(0, 0)`);
-      await clickButton(cdp, "Pause motion");
-      await sleep(300);
-      r.divider.pauseMotion = await pluckDivider(cdp);
-      await setReducedMotion(cdp, true);
-      await load(cdp);
-      r.divider.reducedMotion = await pluckDivider(cdp);
-      const { root } = await cdp.send("DOM.getDocument", { depth: 0 });
-      const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: "footer > div[aria-hidden] svg" });
-      const ax = await cdp.send("Accessibility.getPartialAXTree", { nodeId, fetchRelatives: false });
-      r.divider.inAccessibilityTree = !ax.nodes[0].ignored;
+    await step(`page ${vp.name}`, async () => {
       await setReducedMotion(cdp, false);
-    }
+      await setViewport(cdp, vp);
+      await load(cdp);
+      await sleep(2000);
+      r.landmarks = await cdp.evaluate(LANDMARKS);
+      r.nav = await cdp.evaluate(NAV_STATE);
+      r.layout = await cdp.evaluate(LAYOUT);
+      r.collection = await cdp.evaluate(COLLECTION);
+
+      // The Collection, screen by screen from its top.
+      note("Collection screenshots");
+      if (vp.name !== "narrow" && r.collection) {
+        const top = await cdp.evaluate(`Math.round(document.getElementById("collection").getBoundingClientRect().top + scrollY)`);
+        const screens = Math.ceil(r.collection.height / vp.height);
+        for (let i = 0; i < screens; i++) {
+          await cdp.evaluate(`window.scrollTo(0, ${top + i * vp.height})`);
+          await sleep(200);
+          await screenshot(cdp, `${args.label}-collection-${vp.name}-${i + 1}.png`);
+        }
+        await cdp.evaluate(`window.scrollTo(0, 0)`);
+      }
+
+      // Screenshots: the first screen and the bottom of the page, in each mode.
+      if (vp.name !== "narrow") {
+        for (const mode of MODES) {
+          note(`${mode.label}: top and bottom screenshots`);
+          await clickButton(cdp, mode.label);
+          await sleep(mode.slug === "night" ? 500 : 5000);
+          await cdp.evaluate(`window.scrollTo(0, 0)`);
+          await sleep(200);
+          await screenshot(cdp, `${args.label}-page-${vp.name}-${mode.slug}-top.png`);
+          await cdp.evaluate(`window.scrollTo(0, document.documentElement.scrollHeight)`);
+          await sleep(300);
+          const shot = await screenshot(cdp, `${args.label}-page-${vp.name}-${mode.slug}-bottom.png`);
+          r[`seam-${mode.slug}`] = await cdp.evaluate(`(${SEAM})(${JSON.stringify(shot)}, ${vp.dpr})`);
+        }
+        await clickButton(cdp, "Night");
+        await cdp.evaluate(`window.scrollTo(0, 0)`);
+        await sleep(1500);
+      }
+
+      // Tab through the whole page from the top, with a screenshot of each stop.
+      note("Tab-through");
+      await cdp.evaluate(`(() => { document.activeElement?.blur(); window.scrollTo(0, 0); })()`);
+      const order = [];
+      for (let i = 0; i < 30; i++) {
+        await pressTab(cdp);
+        await sleep(60);
+        const f = await cdp.evaluate(FOCUSED);
+        if (!f || (order.length && f.name === order[0].name && f.tag === order[0].tag)) break;
+        order.push(f);
+        if (vp.name !== "narrow") await screenshot(cdp, `${args.label}-tab-${vp.name}-${String(i + 1).padStart(2, "0")}.png`);
+      }
+      r.tabOrder = order;
+
+      // Skip link: the first stop, visible when focused, and Enter moves focus into main.
+      note("skip link");
+      await cdp.evaluate(`(() => { document.activeElement?.blur(); window.scrollTo(0, 0); })()`);
+      await pressTab(cdp);
+      const skip = await cdp.evaluate(FOCUSED);
+      await pressKey(cdp, "Enter");
+      await sleep(200);
+      await pressTab(cdp);
+      const afterSkip = await cdp.evaluate(FOCUSED);
+      r.skipLink = { first: skip, nextAfterEnter: afterSkip };
+
+      // Contact and my name, clicked repeatedly (only while the links are inline).
+      note("header links");
+      if (!r.nav.menuButton) r.links = await headerLinks(cdp);
+
+      // The Menu fallback, when the links don't fit.
+      note("Menu");
+      if (r.nav.menuButton) {
+        const m = (r.menu = {});
+        await cdp.evaluate(`document.querySelector("nav[aria-label=Main] button").focus()`);
+        await pressKey(cdp, "Enter");
+        await sleep(150);
+        m.afterEnter = await cdp.evaluate(NAV_STATE);
+        await screenshot(cdp, `${args.label}-menu-${vp.name}-open.png`);
+        await pressTab(cdp);
+        m.tabIntoPanel = await cdp.evaluate(`document.activeElement.closest("#site-menu") ? document.activeElement.textContent.trim() : null`);
+        await pressKey(cdp, "Escape");
+        await sleep(150);
+        m.afterEscape = await cdp.evaluate(NAV_STATE);
+        m.focusAfterEscape = await cdp.evaluate(FOCUSED);
+        await cdp.evaluate(`document.querySelector("nav[aria-label=Main] button").click()`);
+        await sleep(150);
+        const opened = await cdp.evaluate(NAV_STATE);
+        const outside = { x: Math.round(vp.width / 2), y: Math.round(vp.height * 0.7), button: "left", clickCount: 1 };
+        await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...outside });
+        await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...outside });
+        await sleep(150);
+        m.outsideClick = { before: opened.expanded, after: (await cdp.evaluate(NAV_STATE)).expanded };
+      }
+
+      note("string divider");
+      // String divider: plucks with motion on; not with Pause motion or reduced
+      // motion. Hidden from the accessibility tree.
+      if (vp.name === "desktop") {
+        r.divider = { motionOn: await pluckDivider(cdp) };
+        await cdp.evaluate(`window.scrollTo(0, 0)`);
+        await clickButton(cdp, "Pause motion");
+        await sleep(300);
+        r.divider.pauseMotion = await pluckDivider(cdp);
+        await setReducedMotion(cdp, true);
+        await load(cdp);
+        r.divider.reducedMotion = await pluckDivider(cdp);
+        const { root } = await cdp.send("DOM.getDocument", { depth: 0 });
+        const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: "footer > div[aria-hidden] svg" });
+        const ax = await cdp.send("Accessibility.getPartialAXTree", { nodeId, fetchRelatives: false });
+        r.divider.inAccessibilityTree = !ax.nodes[0].ignored;
+        await setReducedMotion(cdp, false);
+      }
+    });
   }
   return out;
 }
@@ -1418,38 +1523,55 @@ const cdp = await connect();
 await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: INSTRUMENT });
 const only = args.only?.split(",");
 const report = { url: args.url, date: new Date().toISOString() };
+let failure = null;
 try {
   if (!args["no-modes"]) {
     report.modes = {};
     for (const vp of VIEWPORTS) {
       if (only && !only.includes(vp.name)) continue;
       process.stdout.write(`measuring ${vp.name}...\n`);
-      report.modes[vp.name] = await measureModes(cdp, vp);
+      report.modes[vp.name] = await step(`contrast ${vp.name}`, () => measureModes(cdp, vp));
     }
   }
   if (args.rotation) {
     report.rotation = {};
     for (const variant of ["running", "paused", "reduced"]) {
       process.stdout.write(`rotation (${variant})...\n`);
-      report.rotation[variant] = await rotationTest(cdp, variant);
+      report.rotation[variant] = await step(`rotation ${variant}`, () => rotationTest(cdp, variant));
     }
   }
   if (args.perf) {
     process.stdout.write("performance...\n");
-    report.perf = await perfTest(cdp);
+    report.perf = await step("performance", () => perfTest(cdp));
   }
   if (args.still) {
     process.stdout.write("still frames...\n");
-    report.still = await stillTest(cdp);
+    report.still = await step("still frames", () => stillTest(cdp));
   }
   if (args.page) {
     process.stdout.write("page layout...\n");
     report.page = await pageTest(cdp);
   }
+} catch (error) {
+  failure = error;
 } finally {
   cdp.close();
 }
+report.timing = timing;
+if (failure) {
+  // Keep what was measured before the failure, for working out what went wrong.
+  report.error = failure.message;
+  writeFileSync(join(OUT_DIR, `${args.label}-report.json`), JSON.stringify(report, null, 1));
+  console.error(`\n${failure.message}`);
+  console.error(`What was measured before that is in ${OUT_DIR}/${args.label}-report.json.`);
+  process.exit(1);
+}
 writeFileSync(join(OUT_DIR, `${args.label}-report.json`), JSON.stringify(report, null, 1));
 console.log(summarize(report));
+const slowestStep = Object.entries(timing.steps).sort((a, b) => b[1] - a[1])[0];
+console.log(
+  `Timing: slowest step "${slowestStep[0]}" ${(slowestStep[1] / 1000).toFixed(1)} s (limit ${STEP_TIMEOUT_MS / 1000} s); ` +
+    `slowest command ${timing.slowestCommand.method} ${timing.slowestCommand.ms} ms during ${timing.slowestCommand.during} (limit ${COMMAND_TIMEOUT_MS / 1000} s).`,
+);
 console.log(`\nScreenshots and ${args.label}-report.json are in ${OUT_DIR}/`);
 process.exit(0);
