@@ -77,7 +77,7 @@
  * Collection, and the footer all use it, so their left and right edges
  * line up at every width. Full width with the page gutter up to
  * --content-max, then centered. The hero painting doesn't use it: it
- * stays full-bleed.
+ * stays full-bleed, and its text and controls use page-inset (below).
  *
  * Why 1440px: at 1440px and below (laptops and most desktop screens) the
  * layout is exactly as designed and measured, with the 48px gutter. On
@@ -94,6 +94,54 @@
   max-width: var(--content-max);
   margin-inline: auto;
   padding-inline: var(--page-gutter);
+}
+
+/*
+ * The same column, for a full-bleed element: the element itself stays the
+ * full width (the hero's painting fills it edge to edge), and its padding
+ * puts its content on page-container's edges.
+ *
+ * A percentage padding is measured against the containing block's width,
+ * the same width page-container centers itself in. So
+ * (100% - --content-max) / 2 is exactly page-container's auto margin, and
+ * adding the gutter gives its content edge. At --content-max and below
+ * that margin is zero or negative, and max() keeps the plain gutter, so
+ * nothing changes there.
+ */
+@utility page-inset {
+  padding-inline: max(var(--page-gutter), calc((100% - var(--content-max)) / 2 + var(--page-gutter)));
+}
+
+/*
+ * The hero's text scrim on screens wider than 1440px (PaintedHero applies
+ * it with the `min-[1441px]:` variant, so it only exists inside that media
+ * query). Avoid writing its name in comments or docs elsewhere: Tailwind
+ * scans those too and would also output it as a plain class. Up to 1440px the scrim is an oval around the
+ * text, and its left side runs off the screen, so it reads as shade toward
+ * the side of the painting. Wider, the text moves in with the content
+ * column and the whole oval came into view, floating on the light Day
+ * water. This keeps the oval's right half and replaces its left half with
+ * shade that runs out to the hero's left edge, as at 1440px.
+ *
+ * Two background tiles on the one element, side by side, never
+ * overlapping (overlapping layers would darken where they meet):
+ * - Right: the oval's right half. 558px is the distance from the text
+ *   block's center to the scrim's right edge: half of 620px plus the 40%
+ *   (248px) the scrim reaches past it. Above 1440px the block is always
+ *   its full 620px. The ellipse is centered on the tile's left edge, with
+ *   the same color stops as the oval.
+ * - Left: everything from there to the scrim's left edge, which moves out
+ *   past the screen edge (-100vw; the hero's overflow-hidden clips it). It
+ *   is darkest in the middle and fades out to the top and bottom, the same
+ *   profile as the oval's center column (55% of the half-height solid,
+ *   half strength at 78%), so the two tiles meet without a seam.
+ */
+@utility hero-scrim-wide {
+  inset-inline-start: -100vw;
+  background:
+    radial-gradient(100% 50% at 0 50%, var(--color-deep) 55%, rgb(5 8 26 / 0.5) 78%, transparent) right / 558px 100% no-repeat,
+    linear-gradient(transparent, rgb(5 8 26 / 0.5) 11%, var(--color-deep) 22.5%, var(--color-deep) 77.5%, rgb(5 8 26 / 0.5) 89%, transparent)
+      left / calc(100% - 558px) 100% no-repeat;
 }
 
 @layer base {

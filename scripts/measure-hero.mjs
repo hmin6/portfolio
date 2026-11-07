@@ -80,12 +80,18 @@ const TEXT_MIN = 4.5;
 const NON_TEXT_MIN = 3;
 
 /**
+ * Desktops: 1440 (the widest the content column gets, see page-container in
+ * globals.css), and two wider monitors (#29), where the column is centered
+ * and the hero's text and controls move in from the screen edge with it.
+ *
  * The phone sizes: a Galaxy S25 Ultra at its default FHD+ resolution
  * (1080×2340 at 2.625 device pixels per CSS pixel), an iPhone SE, and the
  * narrowest common width.
  */
 const VIEWPORTS = [
   { name: "desktop", width: 1440, height: 900, dpr: 1, mobile: false },
+  { name: "desktop-1920", width: 1920, height: 1080, dpr: 1, mobile: false },
+  { name: "desktop-2560", width: 2560, height: 1440, dpr: 1, mobile: false },
   { name: "phone", width: 412, height: 892, dpr: 2.625, mobile: true },
   { name: "phone-landscape", width: 892, height: 412, dpr: 2.625, mobile: true },
   { name: "se", width: 375, height: 667, dpr: 2, mobile: true },
@@ -519,7 +525,38 @@ const LAYOUT = String.raw`(() => {
     .map((el) => ({ name: el.textContent.trim(), w: rect(el).width, h: rect(el).height }))
     .filter((c) => c.w < 44 || c.h < 44)
     .map((c) => c.name + " " + Math.round(c.w) + "x" + Math.round(c.h));
+
+  // Alignment with the content column (#29). The column's content edges are
+  // the header row's (a page-container) minus its padding. The text block
+  // sits sm:ml-[clamp(4px,1vw,16px)] inside the left edge (0 below sm,
+  // 640px), and the controls end on the right edge. vw counts the
+  // scrollbar, and so does innerWidth.
+  const column = document.querySelector("header .page-container");
+  const cs = getComputedStyle(column);
+  const colLeft = rect(column).left + parseFloat(cs.paddingLeft);
+  const colRight = rect(column).right - parseFloat(cs.paddingRight);
+  const textBlock = rect(document.querySelector("h1").parentElement);
+  const buttons = [...document.querySelectorAll("[aria-labelledby=hero-title] button")];
+  const controlsRight = Math.max(...buttons.map((b) => rect(b).right), rect(document.querySelector('[role="group"]')).right);
+  const round = (v) => Math.round(v * 10) / 10;
+  const expectedTextInset = innerWidth >= 640 ? Math.min(16, Math.max(4, innerWidth / 100)) : 0;
+  const textLeftInset = round(textBlock.left - colLeft);
+  const controlsRightInset = round(colRight - controlsRight);
+  // Positions of the text and controls, to compare runs (nothing should move
+  // at 1440 and below).
+  const box = (el) => { const r = rect(el); return [r.left, r.top, r.width, r.height].map(round); };
+  const positions = { heading: box(document.querySelector("h1")), intro: box(document.querySelector("h1 + p")), link: box(document.querySelector("[aria-labelledby=hero-title] a")) };
+  for (const b of buttons) positions[b.textContent.trim()] = box(b);
   return {
+    alignment: {
+      columnLeft: round(colLeft),
+      columnRight: round(colRight),
+      textLeftInset,
+      expectedTextInset: round(expectedTextInset),
+      controlsRightInset,
+      ok: Math.abs(textLeftInset - expectedTextInset) < 0.5 && Math.abs(controlsRightInset) < 0.5,
+    },
+    positions,
     horizontalScroll: document.documentElement.scrollWidth > innerWidth,
     gapControlsToHeading: Math.round(h1.top - controlsBottom),
     targetsUnder44: [...new Set([...small, ...pageSmall])],
@@ -1462,6 +1499,12 @@ function summarize(report) {
     lines.push(
       `${"".padEnd(17)} layout   ${layoutOk ? "ok" : "*"}  gap ${l.gapControlsToHeading}px, scroll ${l.horizontalScroll}, ` +
         `small targets [${l.targetsUnder44.join(", ")}], heading on first screen ${l.headingFitsFirstScreen}`,
+    );
+    const a = l.alignment;
+    if (!a.ok) failures++;
+    lines.push(
+      `${"".padEnd(17)} column   ${a.ok ? "ok" : "*"}  column ${a.columnLeft}–${a.columnRight}px, text ${a.textLeftInset}px in ` +
+        `(expected ${a.expectedTextInset}), controls ${a.controlsRightInset}px from the right edge (expected 0)`,
     );
     const n = result.night?.night;
     if (n) {

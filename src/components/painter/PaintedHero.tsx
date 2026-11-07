@@ -106,6 +106,12 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
    * The column fills the screen below the site header (--header-h, in
    * globals.css), so the hero still ends at the bottom of the first screen.
    *
+   * `page-inset` (globals.css) pads the controls and text onto the page's
+   * content column, the same edges as the header and the Collection, so on
+   * screens wider than the column they move in with it. The canvases and
+   * overlays are absolutely positioned, which ignores padding, so the
+   * painting still fills the full width.
+   *
    * The controls and text need `relative` to paint above the absolutely
    * positioned canvases. `data-mode` and `data-paused` let the text scrim
    * change with the mode and motion setting (see below).
@@ -117,7 +123,7 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
       data-mode={mode}
       data-paused={paused ? "" : undefined}
       onClick={handleHeroClick}
-      className="group/hero relative flex min-h-[min(calc(100svh_-_var(--header-h)),1100px)] flex-col justify-between gap-8 overflow-hidden bg-deep px-(--page-gutter) pt-[clamp(16px,3vh,28px)] pb-(--hero-pb) text-starlight"
+      className="group/hero relative flex min-h-[min(calc(100svh_-_var(--header-h)),1100px)] flex-col justify-between gap-8 overflow-hidden bg-deep page-inset pt-[clamp(16px,3vh,28px)] pb-(--hero-pb) text-starlight"
     >
       <canvas ref={paintRef} role="img" aria-label={description} className="absolute inset-0 block size-full" />
       <canvas
@@ -216,10 +222,16 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
           between modes over about the time the painting takes to blend.
           While paused, the painting changes mode all at once, so the scrim
           does too. ADR-007 has the measurements behind these values.
+
+          Wider than 1440px, the wide-screen scrim utility in globals.css
+          extends the left side of the scrim to the hero's left edge, so it
+          reads as shade from the side as it does at 1440px, not as an
+          oval. (Tailwind picks up class names even in comments, which is
+          why it isn't named here.)
         */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute -inset-x-[40%] -inset-y-36 -z-10 bg-[radial-gradient(closest-side,var(--color-deep)_55%,rgb(5_8_26/0.5)_78%,transparent)] opacity-60 transition-opacity duration-1000 group-data-[mode=day]/hero:opacity-80 group-data-paused/hero:transition-none motion-reduce:transition-none"
+          className="pointer-events-none absolute -inset-x-[40%] -inset-y-36 -z-10 bg-[radial-gradient(closest-side,var(--color-deep)_55%,rgb(5_8_26/0.5)_78%,transparent)] min-[1441px]:hero-scrim-wide opacity-60 transition-opacity duration-1000 group-data-[mode=day]/hero:opacity-80 group-data-paused/hero:transition-none motion-reduce:transition-none"
         />
         {children}
       </div>

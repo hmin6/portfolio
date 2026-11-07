@@ -15,7 +15,7 @@ Measured on the version from #4, the text failed WCAG AA in many places. Contras
 The worst cases were on narrow phones, where the text sits in the middle of the screen near the bright horizon, above the full-width gradient that darkened the bottom of the hero.
 
 ## Pass bar
-- **Text** (heading and intro): the lightest 1% of pixels behind every line of text must have at least 4.5:1 contrast with the text, in every mode, on a desktop (1440×900) and four phone sizes (412×892 and 892×412, the Galaxy S25 Ultra at its default resolution; 375×667; 320×568). The heading is large text, so AA only asks 3:1 of it; it is held to 4.5:1 anyway. The lightest 1% rather than the single lightest pixel, because a lantern or a highlight stroke can pass behind a letter for a moment; the single lightest pixel is still reported.
+- **Text** (heading and intro): the lightest 1% of pixels behind every line of text must have at least 4.5:1 contrast with the text, in every mode, on a desktop (1440×900; 1920×1080 and 2560×1440 added in #29) and four phone sizes (412×892 and 892×412, the Galaxy S25 Ultra at its default resolution; 375×667; 320×568). The heading is large text, so AA only asks 3:1 of it; it is held to 4.5:1 anyway. The lightest 1% rather than the single lightest pixel, because a lantern or a highlight stroke can pass behind a letter for a moment; the single lightest pixel is still reported.
 - **Pill text**: the same 4.5:1, measured against the pill's fill with whatever shows through it.
 - **Focus ring and pill edges**: 3:1 against the painting next to them (WCAG 1.4.11, non-text contrast).
 
@@ -57,3 +57,20 @@ The single lightest pixel behind the heading is 4.34:1 (phone in landscape, Nigh
 
 ## Update (2026-11-04, #7)
 The site header (ADR-009) made the hero 56px shorter. The painting is laid out by the hero's height, so on a 320×568 phone at Night the heading moved closer to the bright aurora, and its lightest 1% fell to about 3.8:1. The Night scrim went from 50% to 60%, the same as Golden hour, which brought it to about 5.2:1. Day stays at 80%.
+
+## Update (2026-11-06, #29)
+On screens wider than 1440px, the hero's text and controls now line up with the page's content column (the `page-inset` utility in `globals.css`) instead of sitting at the screen edge. That puts the text over a different part of the painting: at 2560px it moved from the dark left building to the open canal, about 24–49% of the way across. The pass bars now also cover two wider desktops, 1920×1080 and 2560×1440, which `npm run measure:hero` measures as `desktop-1920` and `desktop-2560`.
+
+Contrast passed with the scrim unchanged. But over the open water in Day at 2560px, the whole scrim ellipse came into view, and it read as a dark oval floating on the light water. At 1440px its left side runs off the screen, so it reads as shade toward the side of the painting. So above 1440px only, the scrim now keeps the ellipse's right half and replaces its left half with shade that runs out to the hero's left edge (a wide-screen utility in `globals.css`). The two halves are side-by-side background tiles on one element, with the same top-to-bottom profile where they meet, so there's no seam. At 1440px and below, the scrim's computed style and box are identical to before.
+
+Lightest 1% of pixels, worst case across Night, Golden hour, and Day at 1920 and 2560px:
+
+| | Before the move | Moved, oval scrim | Moved, scrim to the left edge |
+|---|---|---|---|
+| Heading | 12.43 | 11.06 | 12.61 |
+| Intro | 11.97 | 11.89 | 11.81 |
+| Pill text | 10.21 | 10.09 | 10.22 |
+| Focus ring | 3.93 | 3.92 | 3.92 |
+| Pill edges | 3.19 | 3.20 | 3.19 |
+
+Left of the text block's center, the new scrim is at least as dark as the oval was, and right of it nothing changed, so it can't lower the text's contrast. The small differences are run-to-run variation in the moving painting. At 1440px and on the four phone sizes the text and controls are in exactly the same place as before, and their results differ from earlier runs only by that same variation.
