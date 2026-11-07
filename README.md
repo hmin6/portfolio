@@ -1,36 +1,107 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Harrison Min · Portfolio
 
-## Getting Started
+My portfolio for backend and data science internships. The hero is an oil painting of a
+canal under the aurora, painted live in your browser one brushstroke at a time.
 
-First, run the development server:
+**Live site: [harrisonmin.vercel.app](https://harrisonmin.vercel.app)**
+
+![The site's hero at night: a painted Venetian-style canal under teal and violet aurora, with the heading "Harrison Min", a short intro, a GitHub button, and controls for time of day, lanterns, and motion](docs/images/hero-night.webp)
+
+## Highlights
+
+- **A live painted hero.** Brushstrokes are drawn onto a Canvas 2D from a scene
+  model, in Night, Golden hour, or Day. Click the water, or press Float a
+  lantern, to set a lantern drifting.
+- **Reduced motion gets a still painting.** With `prefers-reduced-motion` or the
+  Pause motion button, the painting is drawn off screen in small chunks and
+  swapped in finished, so nothing moves. No pre-rendered image ships.
+- **Text contrast is measured, not guessed.** A headless-browser script checks
+  the text against every pixel of the painting behind it. Every line of hero text
+  meets WCAG AA's 4.5:1 in all three modes at seven screen sizes; the measured
+  values are in [ADR-007](docs/decisions/007-text-over-a-live-painting.md).
+- **The Collection.** Aurora (in progress) hangs as a framed painting, drawn on
+  the server as SVG. Woodshed and Pigment are pencil-sketch studies labeled
+  Planned. Each has a Medium placard listing its draft stack.
+
+## Stack
+
+- Next.js 16 (App Router, Cache Components), React 19, TypeScript
+- Tailwind CSS 4
+- Canvas 2D for the hero; server-rendered SVG for the Collection artwork
+- Fraunces and Inter via `next/font`
+- ESLint, with CI on GitHub Actions
+- Deployed on Vercel (free tier)
+
+## Running it locally
+
+Requires Node.js 20.9+ (22+ for `measure:hero`).
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm ci            # install exact versions from package-lock.json
+npm run dev       # dev server at http://localhost:3000
+npm run build     # production build
+npm run lint
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Measuring the hero
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+`npm run measure:hero` opens the page in headless Chrome or Edge and measures
+text contrast over the painting in each mode, focus-ring and button-edge
+contrast, and layout at three desktop and four phone sizes. Run it after
+changing the hero or anything drawn over it.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+It talks to the browser directly, so it needs no extra npm packages; set
+`BROWSER_PATH` if the browser isn't found. Measure a production build, so the
+dev-tools badge isn't in the screenshots:
 
-## Learn More
+```bash
+npm run build && npm run start   # terminal 1
+npm run measure:hero             # terminal 2
+```
 
-To learn more about Next.js, take a look at the following resources:
+It prints a summary that marks with `*` any value below the bars in ADR-007
+(4.5:1 for text, 3:1 for focus rings and edges), and saves screenshots and a
+JSON report to `hero-measurements/` (git-ignored). Optional flags (`--still`,
+`--page`, `--rotation`, `--perf`, and `--readme-shot` to retake the screenshot
+above) are documented at the top of
+[`scripts/measure-hero.mjs`](scripts/measure-hero.mjs).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## How I work
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- Every change starts as a GitHub issue on the
+  [project board](https://github.com/users/hmin6/projects/3)
+  (Backlog → Ready → In Progress → In Review → Done).
+- One branch and one pull request per issue; the PR closes its issue.
+- Commits follow [Conventional Commits](https://www.conventionalcommits.org)
+  (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`).
+- CI runs lint and build on every PR and on every push to main.
+- A ruleset protects `main` from direct pushes.
+- Each issue gets a devlog entry in [`docs/devlog/`](docs/devlog/).
+- Major decisions are recorded in [`docs/decisions/`](docs/decisions/):
+  - [ADR-001: Next.js over Astro](docs/decisions/001-nextjs-over-astro.md)
+  - [ADR-002: Free hosting stack](docs/decisions/002-free-hosting-stack.md)
+  - [ADR-003: Code-generated painting for the hero](docs/decisions/003-code-generated-painting.md)
+  - [ADR-004: Canvas 2D first, WebGL later](docs/decisions/004-canvas-2d-first-webgl-later.md)
+  - [ADR-005: Issue-driven workflow](docs/decisions/005-issue-driven-workflow.md)
+  - [ADR-006: Imperative painter engine behind a thin React component](docs/decisions/006-imperative-painter-engine.md)
+  - [ADR-007: Keeping text readable over a live painting](docs/decisions/007-text-over-a-live-painting.md)
+  - [ADR-008: Still frames painted off screen, not a pre-rendered image](docs/decisions/008-still-frames-painted-off-screen.md)
+  - [ADR-009: Site header above the painting, and Pause motion as a site-wide setting](docs/decisions/009-site-header-and-site-wide-motion.md)
+  - [ADR-010: Collection artwork as SVG drawn on the server, and kind from status](docs/decisions/010-collection-artwork-and-project-kinds.md)
+- I use Claude Code as a development tool. I plan each change in an issue,
+  review every diff, and test it by hand. The ADRs and devlog record the
+  decisions and what I learned.
 
-## Deploy on Vercel
+## Project structure
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+src/app/                    pages, layout, global styles; site.ts and projects.ts hold the content
+src/components/painter/     the hero's brushstroke renderer (engine, scene, strokes, stills, lanterns)
+src/components/collection/  the Collection and its server-drawn SVG artwork
+src/components/layout/      header, nav, footer, string dividers
+src/components/about/       the About section
+scripts/                    measure-hero.mjs, the headless-browser hero checks
+docs/decisions/             architecture decision records (ADRs)
+docs/devlog/                one entry per issue
+reference/                  painted-canal.html, the original prototype
+```
