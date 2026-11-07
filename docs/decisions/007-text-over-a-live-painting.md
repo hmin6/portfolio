@@ -45,6 +45,8 @@ Results, lightest 1% of pixels (worst case anywhere):
 | Focus ring | 1.00 | 3.91 |
 | Pill edges | 1.31 | 3.18 |
 
+*These are the values when this decision was made. Later changes updated them; see the update sections below. For example, the #7 update records the heading at about 5.2:1 on a 320px phone at Night, and the #29 update adds values for 1920 and 2560px screens.*
+
 The single lightest pixel behind the heading is 4.34:1 (phone in landscape, Night), most likely a lantern's glow passing behind a letter. That is above the 3:1 AA bar for large text, and the text shadow covers it.
 
 ## Consequences
