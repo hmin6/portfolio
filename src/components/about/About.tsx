@@ -58,16 +58,16 @@ export default function About() {
               (Spring Boot, PostgreSQL) and data science.
             </p>
             <p>
-              I&apos;ve completed Math 340, 341, 342W, and 343, the math courses of Queens
-              College&apos;s data science track, all taught in R. I&apos;m most interested in
-              machine learning, computer vision, natural language processing, and graphics.
-            </p>
-            <p>
               Every project I&apos;m building is designed around the same loop: measure what
               actually happens, predict with honest probabilities, score those predictions, and
               learn from the results. Aurora, the one I&apos;m building now, will keep a public,
               tamper-evident record of its forecasts, so anyone can check how often it&apos;s
               right.
+            </p>
+            <p>
+              I&apos;ve completed Math 340, 341, 342W, and 343, the math courses of Queens
+              College&apos;s data science track, all taught in R. I&apos;m most interested in
+              machine learning, computer vision, natural language processing, and graphics.
             </p>
           </div>
 
