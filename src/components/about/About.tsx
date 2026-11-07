@@ -19,7 +19,7 @@ import StringDivider from "@/components/layout/StringDivider";
  * LightGBM, OpenCV, ...) stay on the placard and off this list until I have.
  */
 const SKILLS: readonly { group: string; items: readonly string[] }[] = [
-  { group: "Languages", items: ["Python", "Java", "JavaScript", "TypeScript", "C++", "HTML/CSS", "Swift", "R"] },
+  { group: "Languages", items: ["Python", "Java", "JavaScript", "TypeScript", "C++", "HTML/CSS", "Swift"] },
   { group: "Backend", items: ["Spring Boot", "FastAPI", "Node.js", "Express", "PostgreSQL", "MongoDB", "Redis"] },
   { group: "Data", items: ["pandas", "NumPy", "scikit-learn", "XGBoost"] },
   { group: "Frontend", items: ["React", "Next.js", "Tailwind CSS", "Canvas 2D"] },
@@ -65,9 +65,8 @@ export default function About() {
               right.
             </p>
             <p>
-              I&apos;ve completed Math 340, 341, 342W, and 343, the math courses of Queens
-              College&apos;s data science track, all taught in R. I&apos;m most interested in
-              machine learning, computer vision, natural language processing, and graphics.
+              I&apos;m most interested in machine learning, computer vision, natural language
+              processing, and graphics.
             </p>
           </div>
 

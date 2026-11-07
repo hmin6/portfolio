@@ -57,3 +57,6 @@ The hero and the Collection show what I build, but not who I am or what I'm look
 - **Make sure you're measuring the right build.** One measurement run hit an old server
   still running on port 3000. Stopping it and re-running against a fresh server serving
   the new build gave the real results.
+
+## Correction
+The About section wrongly stated that I'd completed Math 341, 342W, and 343, and listed R as a skill. #38 removed both.
