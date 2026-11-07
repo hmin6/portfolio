@@ -927,7 +927,8 @@ async function setReducedMotion(cdp, on) {
 /**
  * The README's screenshot (#32). Reduced motion makes the hero paint its
  * still off screen and swap it in finished, so the picture is never caught
- * half-painted or mid-lantern, and every retake shows the same painting.
+ * half-painted. The strokes are random, so each retake is a slightly
+ * different painting of the same scene.
  * It goes in docs/images/, not public/, so the site doesn't deploy it. WebP
  * at quality 80 keeps the brushstroke texture at a fraction of a PNG's size.
  */
