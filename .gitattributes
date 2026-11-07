@@ -1,0 +1,30 @@
+# Store every text file with LF in the repo and check it out with LF everywhere.
+# eol=lf overrides each machine's core.autocrlf setting for this repo, so
+# Windows, macOS, Linux, and CI all see the same bytes.
+* text=auto eol=lf
+
+# Windows scripts need CRLF to run (none yet; here so future ones work)
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# Lock file: plain text with LF; collapsed by default in GitHub PR diffs
+package-lock.json  text eol=lf linguist-generated=true
+
+# Binary: never converted, diffed, or merged as text
+# (`binary` is shorthand for -text -diff -merge). SVG is XML, so it stays text.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.avif  binary
+*.ico   binary
+*.pdf   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.mp3   binary
+*.wav   binary
+*.mp4   binary
+*.webm  binary
