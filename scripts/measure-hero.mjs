@@ -22,7 +22,9 @@
  *                    nav (inline or Menu), skip link, full-page Tab order,
  *                    string dividers, and the hero's fade into the page;
  *                    and the Collection (#8): its structure, labels, links,
- *                    and screenshots, and the Work link reaching it
+ *                    and screenshots, and the Work link reaching it; and
+ *                    About (#9): its place, heading, groups, screenshots,
+ *                    and the About link reaching it
  *
  * Output goes to hero-measurements/ (git-ignored): one screenshot per viewport
  * and mode, rotation frames, and <label>-report.json. A summary is printed at
@@ -1194,6 +1196,7 @@ const LANDMARKS = String.raw`(() => ({
   footer: document.querySelectorAll("body > footer").length,
   contactTarget: !!document.getElementById("contact"),
   collectionTarget: !!document.getElementById("collection"),
+  aboutTarget: !!document.getElementById("about"),
 }))()`;
 
 /**
@@ -1221,7 +1224,7 @@ const COLLECTION = String.raw`(() => {
   return {
     heading: document.getElementById(section.getAttribute("aria-labelledby"))?.textContent.trim() ?? null,
     afterHero: !!section.previousElementSibling?.matches(hero),
-    beforeFooter: !section.nextElementSibling && section.closest("main")?.nextElementSibling?.tagName === "FOOTER",
+    beforeAbout: section.nextElementSibling?.id === "about",
     dividerAtTop: !!section.firstElementChild?.matches("div[aria-hidden=true]"),
     cards,
     links: [...section.querySelectorAll("a[href]")].map((a) => a.getAttribute("href")),
@@ -1236,11 +1239,48 @@ const COLLECTION = String.raw`(() => {
 function collectionOk(c) {
   if (!c) return false;
   return (
-    c.heading === "The Collection" && c.afterHero && c.beforeFooter && c.dividerAtTop &&
+    c.heading === "The Collection" && c.afterHero && c.beforeAbout && c.dividerAtTop &&
     c.cards.length > 0 &&
     c.cards.every((card) => card.title && card.named === card.title && card.status && card.medium && card.artworkLabeled) &&
     c.cards.every((card) => !card.status.startsWith("Planned") || (card.kind === "study" && card.medium === "Medium (draft)")) &&
     c.animations === 0 && !c.horizontalScroll
+  );
+}
+
+/**
+ * About (#9): where it sits (after the Collection, last in main, so the
+ * footer follows), its heading and opening line, its group headings, and
+ * the oil-painting placard. Like the Collection it has no links of its own
+ * and nothing that moves, so focusable and animations should both be 0.
+ */
+const ABOUT = String.raw`(() => {
+  const section = document.getElementById("about");
+  if (!section) return null;
+  const r = section.getBoundingClientRect();
+  return {
+    heading: document.getElementById(section.getAttribute("aria-labelledby"))?.textContent.trim() ?? null,
+    lead: section.querySelector("h2 + p")?.textContent.trim() ?? null,
+    afterCollection: section.previousElementSibling?.id === "collection",
+    beforeFooter: !section.nextElementSibling && section.closest("main")?.nextElementSibling?.tagName === "FOOTER",
+    dividerAtTop: !!section.firstElementChild?.matches("div[aria-hidden=true]"),
+    groups: [...section.querySelectorAll("h3")].map((h) => h.textContent.trim()),
+    skillGroups: [...section.querySelectorAll("h3 + dl > div > dt")].map((dt) => dt.textContent.trim()),
+    placard: section.querySelector("h4")?.textContent.trim() ?? null,
+    links: [...section.querySelectorAll("a[href]")].map((a) => a.getAttribute("href")),
+    focusable: section.querySelectorAll("a[href], button, input, select, textarea, [tabindex]:not([tabindex='-1'])").length,
+    animations: section.getAnimations({ subtree: true }).length,
+    height: Math.round(r.height),
+    horizontalScroll: document.documentElement.scrollWidth > innerWidth,
+  };
+})()`;
+
+/** Whether the About report meets #9: placement, heading, both groups, nothing to Tab to, nothing moving. */
+function aboutOk(a) {
+  if (!a) return false;
+  return (
+    a.heading === "About" && !!a.lead && a.afterCollection && a.beforeFooter && a.dividerAtTop &&
+    a.groups.includes("Skills") && a.groups.includes("Off the clock") && a.skillGroups.length > 0 && !!a.placard &&
+    a.focusable === 0 && a.animations === 0 && !a.horizontalScroll
   );
 }
 
@@ -1287,11 +1327,18 @@ async function pluckDivider(cdp) {
 const SCROLL_STATE = String.raw`(() => {
   const f = document.querySelector("footer").getBoundingClientRect();
   const c = document.getElementById("collection")?.getBoundingClientRect();
+  const a = document.getElementById("about")?.getBoundingClientRect();
+  // About is the last section, so on a tall screen there may not be enough
+  // page below it to scroll its top all the way up. Then the browser scrolls
+  // as far as it can, and the link has done its job if the page is at the
+  // bottom and About's top is on screen.
+  const atBottom = scrollY + innerHeight >= document.documentElement.scrollHeight - 1;
   return {
     scrollY: Math.round(scrollY),
     atTop: scrollY < 1,
     footerOnScreen: f.top < innerHeight && f.bottom > 0,
     collectionAtTop: !!c && Math.abs(c.top) < 2,
+    aboutReached: !!a && (Math.abs(a.top) < 2 || (atBottom && a.top >= 0)),
     hash: location.hash,
   };
 })()`;
@@ -1313,11 +1360,13 @@ async function clickAt(cdp, selector) {
  * The header's links, clicked more than once, the way a visitor would:
  * Contact must reach the footer every time (even when the URL already ends
  * in #contact), Work must bring the Collection to the top of the screen
- * every time, and my name must go to the top of the home page every time.
+ * every time, About must reach About every time, and my name must go to
+ * the top of the home page every time.
  */
 async function headerLinks(cdp) {
   const contact = `header nav a[href="/#contact"]`;
   const work = `header nav a[href="/#collection"]`;
+  const about = `header nav a[href="/#about"]`;
   const brand = `header a[href="/"]`;
   // The header isn't sticky, so scroll back up before each click, as a
   // visitor would. For my name only 20px, so the header is still on screen
@@ -1339,8 +1388,15 @@ async function headerLinks(cdp) {
   out.workAgain = await clickAt(cdp, work);
   await scrollTo(20);
   out.brandAfterWork = await clickAt(cdp, brand);
+  await scrollTo(0);
+  out.aboutFirst = await clickAt(cdp, about);
+  await scrollTo(0);
+  out.aboutAgain = await clickAt(cdp, about);
+  await scrollTo(20);
+  out.brandAfterAbout = await clickAt(cdp, brand);
   out.ok =
     out.workFirst.collectionAtTop && out.workAgain.collectionAtTop && out.brandAfterWork.atTop &&
+    out.aboutFirst.aboutReached && out.aboutAgain.aboutReached && out.brandAfterAbout.atTop &&
     out.contactFirst.footerOnScreen && out.contactAgain.footerOnScreen && out.contactAfterBrand.footerOnScreen &&
     out.brandAfterContact.atTop && out.brandAgain.atTop;
   return out;
@@ -1370,6 +1426,20 @@ async function pageTest(cdp) {
           await cdp.evaluate(`window.scrollTo(0, ${top + i * vp.height})`);
           await sleep(200);
           await screenshot(cdp, `${args.label}-collection-${vp.name}-${i + 1}.png`);
+        }
+        await cdp.evaluate(`window.scrollTo(0, 0)`);
+      }
+
+      // About, screen by screen from its top, the same way.
+      r.about = await cdp.evaluate(ABOUT);
+      note("About screenshots");
+      if (vp.name !== "narrow" && r.about) {
+        const top = await cdp.evaluate(`Math.round(document.getElementById("about").getBoundingClientRect().top + scrollY)`);
+        const screens = Math.ceil(r.about.height / vp.height);
+        for (let i = 0; i < screens; i++) {
+          await cdp.evaluate(`window.scrollTo(0, ${top + i * vp.height})`);
+          await sleep(200);
+          await screenshot(cdp, `${args.label}-about-${vp.name}-${i + 1}.png`);
         }
         await cdp.evaluate(`window.scrollTo(0, 0)`);
       }
@@ -1547,11 +1617,16 @@ function summarize(report) {
       if (!ok) failures++;
       lines.push(`page ${vp}: collection ${ok ? "ok" : "*"}  ${JSON.stringify(r.collection)}`);
     }
+    if (r.about !== undefined) {
+      const ok = aboutOk(r.about);
+      if (!ok) failures++;
+      lines.push(`page ${vp}: about ${ok ? "ok" : "*"}  ${JSON.stringify(r.about)}`);
+    }
     if (r.links) {
       if (!r.links.ok) failures++;
       const steps = Object.entries(r.links)
         .filter(([k]) => k !== "ok")
-        .map(([k, s]) => `${k} y=${s.scrollY}${s.hash}${s.footerOnScreen ? " footer" : ""}${s.collectionAtTop ? " collection" : ""}${s.atTop ? " top" : ""}`);
+        .map(([k, s]) => `${k} y=${s.scrollY}${s.hash}${s.footerOnScreen ? " footer" : ""}${s.collectionAtTop ? " collection" : ""}${s.aboutReached ? " about" : ""}${s.atTop ? " top" : ""}`);
       lines.push(`page ${vp}: header links ${r.links.ok ? "ok" : "*"}  ${steps.join(", ")}`);
     }
     if (r.menu) lines.push(`page ${vp}: menu ${JSON.stringify(r.menu)}`);
