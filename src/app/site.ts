@@ -32,9 +32,10 @@ export interface NavItem {
  * missing anchor:
  * - Work is the Collection (#8). `section: "/work"` marks it current on
  *   liner notes pages, which live under /work.
- * - About ("/#about") is added by #9, between Work and Contact.
+ * - About is the About section (#9), below the Collection.
  */
 export const NAV: readonly NavItem[] = [
   { label: "Work", href: "/#collection", section: "/work" },
+  { label: "About", href: "/#about" },
   { label: "Contact", href: "/#contact" },
 ];
