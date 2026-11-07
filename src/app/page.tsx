@@ -1,3 +1,4 @@
+import About from "@/components/about/About";
 import Collection from "@/components/collection/Collection";
 import PaintedHero from "@/components/painter/PaintedHero";
 import { SITE } from "./site";
@@ -5,8 +6,8 @@ import { SITE } from "./site";
 // The page stays a Server Component. PaintedHero is a Client Component, and
 // the heading and intro are passed to it as children, so they are rendered
 // here on the server and arrive as HTML before any JavaScript runs. The
-// <main> landmark, header, and footer come from layout.tsx. The Collection
-// sits between the hero and the footer.
+// <main> landmark, header, and footer come from layout.tsx. Below the hero:
+// The Collection, then About, then the footer.
 export default function Home() {
   return (
     <>
@@ -34,6 +35,7 @@ export default function Home() {
         </div>
       </PaintedHero>
       <Collection />
+      <About />
     </>
   );
 }

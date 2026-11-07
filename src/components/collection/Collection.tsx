@@ -163,9 +163,8 @@ export default function Collection() {
             The Collection
           </h2>
           <p className="leading-relaxed text-haze">
-            Three solo projects, each designed to measure what actually happens, predict with
-            honest probabilities, score its own predictions, and learn from the results. Work in
-            progress hangs framed; planned work is shown as studies.
+            {/* The shared "measure, predict, score, learn" loop is told once, in About, not here as well. */}
+            Three solo projects. Work in progress hangs framed; planned work is shown as studies.
           </p>
         </div>
         {/*
