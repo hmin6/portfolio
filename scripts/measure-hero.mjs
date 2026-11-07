@@ -25,6 +25,9 @@
  *                    and screenshots, and the Work link reaching it; and
  *                    About (#9): its place, heading, groups, screenshots,
  *                    and the About link reaching it
+ *   --readme-shot    only retake the README's screenshot (#32): the Night hero
+ *                    at 1440×900 as a finished still, saved to
+ *                    docs/images/hero-night.webp, then exit
  *
  * Output goes to hero-measurements/ (git-ignored): one screenshot per viewport
  * and mode, rotation frames, and <label>-report.json. A summary is printed at
@@ -66,6 +69,7 @@ const { values: args } = parseArgs({
     perf: { type: "boolean", default: false },
     still: { type: "boolean", default: false },
     page: { type: "boolean", default: false },
+    "readme-shot": { type: "boolean", default: false },
   },
 });
 
@@ -920,6 +924,37 @@ async function setReducedMotion(cdp, on) {
   });
 }
 
+/**
+ * The README's screenshot (#32). Reduced motion makes the hero paint its
+ * still off screen and swap it in finished, so the picture is never caught
+ * half-painted. The strokes are random, so each retake is a slightly
+ * different painting of the same scene.
+ * It goes in docs/images/, not public/, so the site doesn't deploy it. WebP
+ * at quality 80 keeps the brushstroke texture at a fraction of a PNG's size.
+ */
+const README_SHOT = "docs/images/hero-night.webp";
+
+async function readmeShot(cdp) {
+  await setReducedMotion(cdp, true);
+  await setViewport(cdp, VIEWPORTS.find((v) => v.name === "desktop"));
+  // Headless Chrome draws a classic scrollbar down the right edge; a visitor's
+  // browser usually overlays or hides it, so leave it out of the picture.
+  await cdp.send("Emulation.setScrollbarsHidden", { hidden: true });
+  await cdp.send("Page.navigate", { url: args.url });
+  await sleep(300);
+  const swapAt = await cdp.evaluate(`(${WAIT_FOR_SWAP})(0, 20000)`);
+  if (swapAt === null) throw new Error("The still frame never appeared.");
+  // Fraunces and Inter must be in before the shot, or the heading may be in
+  // the fallback font.
+  await cdp.evaluate(`document.fonts.ready.then(() => true)`);
+  await sleep(500);
+  const shot = await cdp.send("Page.captureScreenshot", { format: "webp", quality: 80 });
+  const bytes = Buffer.from(shot.data, "base64");
+  mkdirSync("docs/images", { recursive: true });
+  writeFileSync(README_SHOT, bytes);
+  return bytes.length;
+}
+
 /** Animation frames that ran in the next `ms` milliseconds (0 means the loop is stopped). */
 async function framesDuring(cdp, ms) {
   await cdp.evaluate(`window.__frames.splice(0)`);
@@ -1639,6 +1674,15 @@ function summarize(report) {
 mkdirSync(OUT_DIR, { recursive: true });
 const cdp = await connect();
 await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: INSTRUMENT });
+if (args["readme-shot"]) {
+  try {
+    const bytes = await step("README screenshot", () => readmeShot(cdp));
+    console.log(`Saved ${README_SHOT} (${(bytes / 1024).toFixed(0)} KB)`);
+  } finally {
+    cdp.close();
+  }
+  process.exit(0);
+}
 const only = args.only?.split(",");
 const report = { url: args.url, date: new Date().toISOString() };
 let failure = null;
