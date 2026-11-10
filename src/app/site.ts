@@ -9,6 +9,13 @@ export const SITE = {
   github: "https://github.com/hmin6",
   linkedin: "https://www.linkedin.com/in/harrisonmin",
   /**
+   * My resume, a PDF on Google Drive (not in the repo, so its version
+   * history stays private). A new version is uploaded with Drive's "Manage
+   * versions", which keeps this link, so the site never needs to change.
+   * See "Updating the resume" in the README.
+   */
+  resume: "https://drive.google.com/file/d/1ve0UoV5BwgIxNRvgjIMYivnx1B1CaYfT/view",
+  /**
    * The copyright year. A constant rather than `new Date().getFullYear()`:
    * with Cache Components, reading the clock while prerendering fails the
    * build (the page is rendered once at build time, so "now" isn't known).
