@@ -1,6 +1,7 @@
 import About from "@/components/about/About";
 import Collection from "@/components/collection/Collection";
 import PaintedHero from "@/components/painter/PaintedHero";
+import { pillEdge } from "@/components/painter/pill";
 import { SITE } from "./site";
 
 // The page stays a Server Component. PaintedHero is a Client Component, and
@@ -25,12 +26,26 @@ export default function Home() {
           Backend and data science, CS &amp; Math at Queens College. This canal is painted live
           in your browser, one brushstroke at a time.
         </p>
+        {/*
+          GitHub is the primary action, filled with aurora. Resume is the
+          secondary one: the same size, but an outline pill like the hero's
+          controls (pillEdge), so it reads as the quieter of the two. Both
+          open in the same tab, like every link on the site. The footer's
+          resume link says "Google Drive" too; here the short label keeps the
+          row on one line on a 320px phone.
+        */}
         <div className="flex flex-wrap gap-3">
           <a
             href={SITE.github}
             className="inline-flex min-h-12 items-center rounded-full bg-aurora px-[22px] font-semibold text-night"
           >
             GitHub
+          </a>
+          <a
+            href={SITE.resume}
+            className={`inline-flex min-h-12 items-center rounded-full px-[22px] font-semibold text-starlight focus-visible:shadow-focus ${pillEdge}`}
+          >
+            Resume (PDF)
           </a>
         </div>
       </PaintedHero>
