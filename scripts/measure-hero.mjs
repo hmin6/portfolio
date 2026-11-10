@@ -43,7 +43,11 @@
  *   focus), and compares screenshots with and without the ring. The ring's
  *   best color must reach 3:1 against the painting just outside it.
  * - Pill edges: the light border or the dark ring outside it must reach 3:1
- *   against the painting 3.5px out.
+ *   against the painting 3.5px out. Pills are the hero's chip buttons and
+ *   any hero link with a border (the Resume outline link, #13).
+ * - Links: the row under the intro must stay inside the hero's padding with
+ *   at least 12px between links, and every hero button and link must have
+ *   had its focus ring measured.
  * - Still frames: stroke() calls on canvases in the page are counted per
  *   frame (an off-screen still's strokes are counted separately), drawImage
  *   onto the paint canvas marks a still being swapped in, and the canvases
@@ -333,14 +337,30 @@ window.__m = {
     range.selectNodeContents(el);
     return [...range.getClientRects()];
   },
-  chips() { return [...document.querySelectorAll("[aria-labelledby=hero-title] button")].filter((b) => !b.closest('[role="group"]')); },
+  /** Every button and link in the hero. */
+  controls() { return [...document.querySelectorAll("[aria-labelledby=hero-title] :is(button, a)")]; },
+  /**
+   * The pills with their own edge: buttons outside the Time of day group,
+   * and links with a border, like the Resume outline link (#13). The
+   * GitHub button is a solid fill with no border, so it isn't one.
+   */
+  chips() {
+    return __m.controls().filter((el) =>
+      el.matches("button") ? !el.closest('[role="group"]') : parseFloat(getComputedStyle(el).borderTopWidth) > 0,
+    );
+  },
 };`;
 
-/** Hides text (not pills) so a screenshot shows what is behind it. */
+/**
+ * Hides text (not pills) so a screenshot shows what is behind it. The
+ * heading and intro go entirely. Buttons and links keep their fill and edge
+ * and lose only their text, so a pill's text is measured against the pill
+ * (and whatever shows through it), and its edge against the painting.
+ */
 const HIDE_TEXT = `(() => {
   const s = document.createElement("style");
   s.id = "__hide";
-  s.textContent = "h1, h1 + p, [aria-labelledby=hero-title] a { visibility: hidden !important } [aria-labelledby=hero-title] button { color: transparent !important }";
+  s.textContent = "h1, h1 + p { visibility: hidden !important } [aria-labelledby=hero-title] :is(button, a) { color: transparent !important }";
   document.head.append(s);
 })()`;
 const SHOW_TEXT = `document.getElementById("__hide")?.remove()`;
@@ -386,10 +406,10 @@ const ANALYZE = String.raw`async (png, dpr) => {
     edge: {},
   };
 
-  // Text on the pills. The screenshot has their text hidden, so this is the
-  // pill's own fill (including whatever shows through it).
-  for (const b of document.querySelectorAll("[aria-labelledby=hero-title] button")) {
-    result.chipText[b.textContent.trim()] = stats(sampleText(b));
+  // Text on the pills and links. The screenshot has their text hidden, so
+  // this is each one's own fill (including whatever shows through it).
+  for (const el of __m.controls()) {
+    result.chipText[el.textContent.trim()] = stats(sampleText(el));
   }
 
   // Pill edge: the light border (just inside the edge) or the dark ring
@@ -516,8 +536,8 @@ const NIGHT_EDGES = String.raw`async (png, dpr) => {
 const LAYOUT = String.raw`(() => {
   const rect = (el) => el.getBoundingClientRect();
   const h1 = rect(document.querySelector("h1"));
-  const link = rect(document.querySelector("[aria-labelledby=hero-title] a"));
-  const controls = [...document.querySelectorAll("[aria-labelledby=hero-title] button, [aria-labelledby=hero-title] a")];
+  const links = [...document.querySelectorAll("[aria-labelledby=hero-title] a")];
+  const controls = __m.controls();
   const controlsBottom = Math.max(...[...document.querySelectorAll("[aria-labelledby=hero-title] button")].map((b) => rect(b).bottom));
   const small = controls
     .map((el) => ({ name: el.textContent.trim(), w: rect(el).width, h: rect(el).height }))
@@ -551,8 +571,33 @@ const LAYOUT = String.raw`(() => {
   // Positions of the text and controls, to compare runs (nothing should move
   // at 1440 and below).
   const box = (el) => { const r = rect(el); return [r.left, r.top, r.width, r.height].map(round); };
-  const positions = { heading: box(document.querySelector("h1")), intro: box(document.querySelector("h1 + p")), link: box(document.querySelector("[aria-labelledby=hero-title] a")) };
-  for (const b of buttons) positions[b.textContent.trim()] = box(b);
+  const positions = { heading: box(document.querySelector("h1")), intro: box(document.querySelector("h1 + p")) };
+  for (const el of controls) positions[el.textContent.trim()] = box(el);
+
+  // The row of links under the intro (GitHub, Resume): whether it's one
+  // line, the smallest space between two neighbors (beside each other on a
+  // line, or between lines if it wraps), and whether every link stays
+  // inside the hero's padding. "Not crowded" is a gap of at least 12px,
+  // the row's gap-3, and nothing past the padding.
+  const heroEl = document.querySelector("[aria-labelledby=hero-title]");
+  const contentRight = hero.right - parseFloat(getComputedStyle(heroEl).paddingRight);
+  const lr = links.map(rect);
+  const lineTops = new Set(lr.map((r) => Math.round(r.top)));
+  let minGap = null;
+  for (let i = 1; i < lr.length; i++) {
+    const a = lr[i - 1], b = lr[i];
+    const gap = Math.round(b.top) === Math.round(a.top) ? b.left - a.right : b.top - a.bottom;
+    minGap = minGap === null ? gap : Math.min(minGap, gap);
+  }
+  const insidePadding = lr.every((r) => r.right <= contentRight + 0.5);
+  const linkRow = {
+    links: links.map((a) => a.textContent.trim()),
+    lines: lineTops.size,
+    minGap: minGap === null ? null : round(minGap),
+    rightmost: round(Math.max(...lr.map((r) => r.right))),
+    contentRight: round(contentRight),
+    ok: insidePadding && (minGap === null || minGap >= 11.5),
+  };
   return {
     alignment: {
       columnLeft: round(colLeft),
@@ -563,11 +608,12 @@ const LAYOUT = String.raw`(() => {
       ok: Math.abs(textLeftInset - expectedTextInset) < 0.5 && Math.abs(controlsRightInset) < 0.5,
     },
     positions,
+    linkRow,
     horizontalScroll: document.documentElement.scrollWidth > innerWidth,
     gapControlsToHeading: Math.round(h1.top - controlsBottom),
     targetsUnder44: [...new Set([...small, ...pageSmall])],
     headingFitsFirstScreen: h1.bottom <= innerHeight,
-    linkFitsFirstScreen: link.bottom <= innerHeight,
+    linkFitsFirstScreen: Math.max(...lr.map((r) => r.bottom)) <= innerHeight,
     heroHeight: Math.round(hero.height),
   };
 })()`;
@@ -1596,14 +1642,27 @@ function summarize(report) {
         [worstP1(m.edge), NON_TEXT_MIN],
       ];
       failures += cells.filter(([v, bar]) => v === null || v === undefined || v < bar).length;
-      lines.push(`${vp.padEnd(17)} ${mode.slug.padEnd(7)} ${cells.map(([v, bar]) => mark(v, bar)).join("  ")}`);
+      // Every button and link whose text was measured must also have had its
+      // focus ring measured, so a new control (like Resume, #13) can't slip
+      // past the ring column by never being reached with Tab.
+      const noRing = Object.keys(m.chipText ?? {}).filter((name) => !m.ring?.[name]);
+      if (noRing.length) failures++;
+      lines.push(
+        `${vp.padEnd(17)} ${mode.slug.padEnd(7)} ${cells.map(([v, bar]) => mark(v, bar)).join("  ")}` +
+          (noRing.length ? `  * no ring measured: ${noRing.join(", ")}` : ""),
+      );
     }
     const l = result.layout;
-    const layoutOk = !l.horizontalScroll && l.gapControlsToHeading > 0 && l.targetsUnder44.length === 0;
+    const layoutOk = !l.horizontalScroll && l.gapControlsToHeading > 0 && l.targetsUnder44.length === 0 && l.linkRow.ok;
     if (!layoutOk) failures++;
     lines.push(
       `${"".padEnd(17)} layout   ${layoutOk ? "ok" : "*"}  gap ${l.gapControlsToHeading}px, scroll ${l.horizontalScroll}, ` +
         `small targets [${l.targetsUnder44.join(", ")}], heading on first screen ${l.headingFitsFirstScreen}`,
+    );
+    const row = l.linkRow;
+    lines.push(
+      `${"".padEnd(17)} links    ${row.ok ? "ok" : "*"}  ${row.links.join(" + ")} on ${row.lines} line(s), ` +
+        `min gap ${row.minGap}px (12px wanted), right edge ${row.rightmost}px (padding at ${row.contentRight}px)`,
     );
     const a = l.alignment;
     if (!a.ok) failures++;

@@ -4,24 +4,14 @@ import { useEffect, useEffectEvent, useRef, useState, type MouseEvent, type Reac
 import { resolvePaused, setUserPaused, usePrefersReducedMotion, useUserPaused } from "../motion";
 import { createPainter, type Painter } from "./engine";
 import { MODES, type ModeId } from "./palettes";
+import { pillEdge } from "./pill";
 
 /*
- * Pill buttons over the painting. `aria-pressed:` styles apply only when
- * aria-pressed="true", so the visible state always matches what screen
- * readers announce.
- *
- * The pill edge has two tones for the same reason as the focus ring in
- * globals.css: a light border shows against the dark Night sky, and a 1px
- * dark ring (`ring-1`, a box-shadow) outside it shows against the bright
- * Day sky. `focus-visible:shadow-focus` keeps the focus ring's dark bands,
- * which the ring utility would otherwise replace.
- *
- * Against a mid-tone part of the painting, neither tone reaches 3:1 unless
- * the two are at least 9:1 apart, so the border is 80% starlight (it blends
- * with the dark fill behind it) and the ring is 85% deep.
+ * Pill buttons over the painting, edged with pillEdge (pill.ts explains its
+ * two tones). `aria-pressed:` styles apply only when aria-pressed="true", so
+ * the visible state always matches what screen readers announce.
  */
 const pressedStyle = "aria-pressed:bg-starlight aria-pressed:text-night";
-const pillEdge = "border border-starlight/80 bg-deep/70 ring-1 ring-deep/85 backdrop-blur-md";
 const chipStyle = `min-h-12 cursor-pointer rounded-full px-3 text-sm font-medium text-starlight focus-visible:shadow-focus sm:px-[18px] ${pillEdge} ${pressedStyle}`;
 const segmentStyle = `min-h-11 min-w-11 cursor-pointer rounded-full px-3 text-sm whitespace-nowrap font-medium text-starlight sm:px-3.5 ${pressedStyle}`;
 
@@ -203,7 +193,8 @@ export default function PaintedHero({ titleId, children }: PaintedHeroProps) {
         scrim's -z-10 puts it behind the text but still above the painting.
         The text shadow covers brief bright spots (a lantern or sun glint
         drifting behind a letter) that the scrim alone would let through.
-        Links are left out: the GitHub button has dark text on its own fill.
+        Links are left out: each has its own fill behind its text (dark text
+        on aurora for GitHub, starlight on the dark pill for Resume).
       */}
       <div className="relative isolate flex max-w-[620px] flex-col gap-[18px] sm:ml-[clamp(4px,1vw,16px)] [text-shadow:0_1px_2px_rgb(5_8_26/0.6),0_0_16px_rgb(5_8_26/0.45)] [&_a]:[text-shadow:none]">
         {/*
