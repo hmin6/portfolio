@@ -5,7 +5,7 @@ canal under the aurora, painted live in your browser one brushstroke at a time.
 
 **Live site: [harrisonmin.vercel.app](https://harrisonmin.vercel.app)**
 
-![The site's hero at night: a painted Venetian-style canal under teal and violet aurora, with the heading "Harrison Min", a short intro, a GitHub button, and controls for time of day, lanterns, and motion](docs/images/hero-night.webp)
+![The site's hero at night: a painted Venetian-style canal under teal and violet aurora, with the heading "Harrison Min", a short intro, GitHub and Resume (PDF) buttons, and controls for time of day, lanterns, and motion](docs/images/hero-night.webp)
 
 ## Highlights
 
@@ -65,6 +65,27 @@ JSON report to `hero-measurements/` (git-ignored). Optional flags (`--still`,
 `--page`, `--rotation`, `--perf`, and `--readme-shot` to retake the screenshot
 above) are documented at the top of
 [`scripts/measure-hero.mjs`](scripts/measure-hero.mjs).
+
+## Updating the resume
+
+The resume is a PDF on Google Drive, not a file in this repo, so its version
+history stays private. Its link is `SITE.resume` in
+[`src/app/site.ts`](src/app/site.ts), used by the hero's Resume (PDF) button and
+the footer.
+
+To publish a new version:
+
+1. In Google Drive, right-click the resume and choose **Manage versions** (under
+   **File information** in newer versions of Drive).
+2. Choose **Upload new version** and pick the new PDF.
+
+The file keeps its ID, so the link stays the same and the site needs no commit or
+deploy. Only people with edit access can see earlier versions. Afterward, open the
+link in a private window to check that it still opens without signing in.
+
+The PDF is compiled from LaTeX, so it isn't a tagged PDF: it has no tags for
+headings or reading order, and screen readers get only its text, in the order the
+viewer guesses.
 
 ## How I work
 

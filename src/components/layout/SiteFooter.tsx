@@ -8,7 +8,7 @@ const linkStyle =
  * The site footer, on every page: how to reach me, what the site is built
  * with, and the copyright line. `id="contact"` is the target of the nav's
  * Contact link. Plain links, no new tabs: the browser's back button
- * returns here.
+ * returns here, from the resume on Google Drive too.
  */
 export default function SiteFooter() {
   return (
@@ -31,6 +31,12 @@ export default function SiteFooter() {
             <li>
               <a href={SITE.linkedin} className={linkStyle}>
                 LinkedIn
+              </a>
+            </li>
+            <li>
+              {/* The text says where the link goes: a PDF, opened in Google Drive's viewer. */}
+              <a href={SITE.resume} className={linkStyle}>
+                Resume (PDF, Google Drive)
               </a>
             </li>
           </ul>
